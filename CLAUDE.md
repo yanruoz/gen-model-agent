@@ -17,4 +17,5 @@ Project 1 (dimension-reduction agent) lives at `../dim-reduction-agent`. Its han
 
 - Entry point: `./run.sh <dataset> "<objective>"`. It prepares `venv/` and the data, then runs Claude Code headless (`claude -p --permission-mode dontAsk`) with this file as the agent's instructions. Tools outside the allowlist in `.claude/pipeline-settings.json` are denied, never prompted. `.claude/settings.json` holds dev settings for interactive sessions only. Runs use the Claude Code login unless `--use-api-key` is passed.
 - Every command goes through `venv/bin/python` / `venv/bin/pip`, never a system or conda interpreter (Project 1 incident, see HANDOFF §6).
-- The full pipeline steps (objective interpretation, model selection, training, evaluation, recommendation, report) are added here as they are built.
+- The pipeline agent's instructions live in `AGENT.md`, which `run.sh` appends to the system prompt. This file (CLAUDE.md) is for development sessions. Change pipeline behavior in `AGENT.md`, the skills under `.claude/skills/`, or the scripts, not here.
+- Decision logic: `.claude/skills/{objective-interpretation,data-profiling,model-selection,downstream-use,reporting}/SKILL.md`. Mechanical checks: `scripts/validate_{objective,plan,recommendation}.py`.

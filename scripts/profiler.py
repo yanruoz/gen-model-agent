@@ -96,7 +96,11 @@ def profile_dataset(X, y=None, metadata=None):
         profile["minority_class"] = str(classes[np.argmin(counts)])
 
     if metadata:
-        profile["metadata"] = metadata
+        # Long lists (e.g. 32,738 gene names) would make profile.json too large to read; keep a count and examples.
+        profile["metadata"] = {
+            k: ({"n": len(v), "first": [str(x) for x in v[:5]]} if isinstance(v, (list, tuple)) and len(v) > 20 else v)
+            for k, v in metadata.items()
+        }
 
     return profile
 

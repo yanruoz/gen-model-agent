@@ -31,7 +31,7 @@ C2ST_FOLDS = 5
 C2ST_REFERENCE_WARN = 0.65  # real-vs-real AUC above this flags a biased evaluation space
 
 DEFINITIONS = {
-    "mmd2": "Squared maximum mean discrepancy (RBF kernel, bandwidth = median distance among held-out real samples) between synthetic and held-out real samples in the evaluation PCA space. 0 = same distribution; compare with mmd2_reference.",
+    "mmd2": "Squared maximum mean discrepancy (RBF kernel, bandwidth = median distance among held-out real samples) between synthetic and held-out real samples in the evaluation PCA space. 0 = same distribution; compare with mmd2_reference. The estimator is unbiased, so values near 0 can be slightly negative.",
     "mmd2_reference": "Same MMD, but a training-set subsample vs held-out real: the value two real samples of this size give.",
     "c2st_auc": "Classifier two-sample test: cross-validated ROC AUC of a gradient-boosted classifier separating synthetic from held-out real samples. 0.5 = indistinguishable, 1.0 = perfectly separable.",
     "c2st_auc_reference": "Same test, training subsample vs held-out real (should be near 0.5).",

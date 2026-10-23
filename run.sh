@@ -70,7 +70,7 @@ else
     # Next free report number across reports/*/generated_report_*.pdf, starting at 1.
     REPORT_NUMBER=$(( $(ls reports/*/generated_report_*.pdf 2>/dev/null | wc -l) + 1 ))
   fi
-  PROMPT="Run the full generative-modeling pipeline in CLAUDE.md.
+  PROMPT="Run the full generative-modeling pipeline described in AGENT.md (it is also appended to your system prompt).
 dataset: $DATASET
 objective: $OBJECTIVE
 report number: $REPORT_NUMBER
@@ -83,31 +83,26 @@ echo "[agent] claude -p (dataset=$DATASET${OBJECTIVE:+, objective=\"$OBJECTIVE\"
 # Deny rules beat allow rules across sources, so pipeline-settings.json denies everything the dev
 # file allows (tests/test_settings.py checks this). dontAsk: anything not allowlisted is denied,
 # never prompted, so the run can't hang. --strict-mcp-config: no MCP servers in pipeline runs.
+# AGENT.md (the pipeline instructions) is appended to the system prompt; CLAUDE.md is the dev file.
+# stream-json + bin/agent_stream.py: live progress lines, full transcript, final result JSON.
+STATUS=0
 claude -p "$PROMPT" \
+  --append-system-prompt-file AGENT.md \
   --settings .claude/pipeline-settings.json \
   --permission-mode dontAsk \
   --strict-mcp-config \
-  --output-format json > "$OUT/agent_result.json" || echo "[agent] claude exited nonzero" >&2
-
-# Report what the agent said and any tool calls that were denied (should be none).
-STATUS=0
-venv/bin/python - "$OUT/agent_result.json" <<'PY' || STATUS=$?
-import json, sys
-r = json.load(open(sys.argv[1]))
-print("[agent] result:", (r.get("result") or "").strip()[:500])
-denied = r.get("permission_denials") or []
-print(f"[agent] permission denials: {len(denied)}")
-for d in denied:
-    print("   -", d.get("tool_name"), json.dumps(d.get("tool_input"))[:200])
-sys.exit(1 if r.get("is_error") or denied else 0)
-PY
+  --output-format stream-json --verbose \
+  | venv/bin/python bin/agent_stream.py "$OUT" || STATUS=$?
 
 # ── Step 5: success check ──
 if [[ $SMOKE -eq 1 ]]; then
   [[ -f "$OUT/profile.json" && -f "$OUT/smoke.txt" ]] || { echo "SMOKE FAIL: expected files missing" >&2; exit 1; }
+  DENIED=$(venv/bin/python -c "import json;print(len(json.load(open('$OUT/agent_result.json')).get('permission_denials') or []))")
+  [[ $STATUS -eq 0 && $DENIED -eq 0 ]] || { echo "SMOKE FAIL: status $STATUS, $DENIED permission denials" >&2; exit 1; }
   echo "SMOKE PASS"
-  exit $STATUS
+  exit 0
 fi
 PDF="reports/$DATASET/generated_report_$REPORT_NUMBER.pdf"
 [[ -f "$PDF" ]] || { echo "FAIL: $PDF was not produced" >&2; exit 1; }
+[[ $STATUS -eq 0 ]] || { echo "FAIL: agent run ended with an error (see $OUT/agent_result.json)" >&2; exit 1; }
 echo "DONE: $PDF"

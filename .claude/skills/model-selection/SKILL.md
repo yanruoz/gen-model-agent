@@ -75,7 +75,7 @@ Don't add models just to fill the table: each one needs a reason tied to the obj
 - `latent_dim`: 10 when `n_train` < 5,000; 16 up to 50,000; 32 above. A small latent space is enough for a few thousand samples and gives a representation that is easy to inspect. More dimensions mostly fit noise at this size.
 - `hidden_dims`: `[256, 128]` when the input has >= 1,000 features, else `[128, 64]`.
 - `batch_size`: 128 (for `n_train` < 1,000, use 64 so an epoch has more than a handful of steps).
-- `epochs`: a **maximum**. `train.py` always sets aside 10% of the training split for validation, stops when validation loss hasn't improved for 25 epochs, and keeps the best weights, so too many epochs costs time, not overfitting. Use 300–400 for a few thousand samples, and lower it only to fit the budget. (On PBMC, held-out loss bottomed out near epoch 70 and rose after; early stopping caught it.)
+- `epochs`: a **maximum**. `train.py` always sets aside 10% of the training split for validation, stops when validation loss hasn't improved for 25 epochs, and keeps the best weights, so too many epochs costs time, not overfitting. Use 300–400 for a few thousand samples, and lower it only to fit the budget. On small datasets, held-out loss typically bottoms out well before the maximum.
 - `kl_warmup_epochs`: about 10% of epochs. Ramping the KL weight from 0 to 1 avoids posterior collapse early in training.
 - `lr`: 1e-3 (Adam). Lower to 5e-4 if the loss curve from a previous run oscillates.
 
@@ -88,9 +88,9 @@ Don't add models just to fill the table: each one needs a reason tied to the obj
 
 ## Timing table (Apple M4 CPU/MPS; per seed)
 
-Measured on this machine (training only; generation + evaluation add about 0.2 min per model on PBMC). Use these for `estimated_minutes` and round up generously. Early stopping usually ends sooner than the maximum, but the estimate should cover the maximum.
+Measured on this machine for training to the maximum epochs (generation + evaluation add about 0.2 min per model at this size). Scale roughly linearly with samples x features for the VAE and with samples for the flow. Use these for `estimated_minutes` and round up generously; the estimate should cover the maximum, even though early stopping usually ends sooner. These are timing benchmarks only, not evidence about how any particular dataset behaves.
 
-| Model | Data | Setting | Minutes (to max epochs) | Observed with early stopping |
-|---|---|---|---|---|
-| VAE (nb), CPU | 1,944 x 2,000 counts | 400 epochs, batch 128, [256, 128] | 0.9 | 0.17 (stopped at 91) |
-| Flow (RealNVP), CPU | 1,944 x 20 PCA | 8 layers, hidden 128, 400 epochs | ~0.2 | 0.02 (stopped at 38) |
+| Model | Size | Setting | Minutes to max epochs |
+|---|---|---|---|
+| VAE (nb), CPU | ~2,000 samples x 2,000 features | 400 epochs, batch 128, [256, 128] | 0.9 |
+| Flow (RealNVP), CPU | ~2,000 samples x 20 dims | 8 layers, hidden 128, 400 epochs | ~0.2 |
