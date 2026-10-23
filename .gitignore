@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+venv/
+.venv/
+
+# Secrets
+.env
+
+# Data, models, and run artifacts
+data/
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+outputs/
+wandb/
+lightning_logs/
+
+# OS
+.DS_Store
