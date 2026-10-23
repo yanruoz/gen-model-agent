@@ -16,7 +16,9 @@ venv/
 .env
 
 # Data, models, and run artifacts
-data/
+# Data files are fetched by run.sh; only each dataset's DATA_DESCRIPTION.md is tracked.
+data/*/*
+!data/*/DATA_DESCRIPTION.md
 checkpoints/
 *.pt
 *.pth

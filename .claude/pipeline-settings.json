@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(venv/bin/python scripts/*)",
+      "Bash(ls *)",
+      "Read(./**)",
+      "Edit(./outputs/**)",
+      "Write(./outputs/**)",
+      "Agent(gen-critic)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Edit(./data/**)",
+      "Write(./data/**)",
+      "Edit(./reports/**)",
+      "Write(./reports/**)",
+      "Bash(*pip install*)",
+      "Bash(rm *)",
+      "Bash(git *)",
+      "WebFetch",
+      "WebSearch"
+    ]
+  }
+}

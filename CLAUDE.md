@@ -11,4 +11,10 @@ Project 1 (dimension-reduction agent) lives at `../dim-reduction-agent`. Its han
 - **Single command:** the full pipeline must run with one command, given a dataset and a user objective.
 - **Secrets:** API keys are read from `.env` (see `.env.example`). Never hardcode keys or commit `.env`.
 - **Commit at each working milestone**, with a message that says what now works.
-- **Deadline:** Sun Oct 26, 2026, 11:59 PM ET.
+- **Deadline:** Mon Oct 26, 2026, 11:59 PM ET.
+
+## How it runs
+
+- Entry point: `./run.sh <dataset> "<objective>"`. It prepares `venv/` and the data, then runs Claude Code headless (`claude -p --permission-mode dontAsk`) with this file as the agent's instructions. Tools outside the allowlist in `.claude/pipeline-settings.json` are denied, never prompted. `.claude/settings.json` holds dev settings for interactive sessions only. Runs use the Claude Code login unless `--use-api-key` is passed.
+- Every command goes through `venv/bin/python` / `venv/bin/pip`, never a system or conda interpreter (Project 1 incident, see HANDOFF §6).
+- The full pipeline steps (objective interpretation, model selection, training, evaluation, recommendation, report) are added here as they are built.
