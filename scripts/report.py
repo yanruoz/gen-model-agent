@@ -134,6 +134,9 @@ def load_all(dataset):
     a["keys"] = ok
     a["metrics"] = {k: _load(out / "metrics" / f"{k}.json") for k in ok if (out / "metrics" / f"{k}.json").exists()}
     a["runs"] = {k: _load(out / "runs" / f"{k}.json") for k in ok if (out / "runs" / f"{k}.json").exists()}
+    a["downstream"] = _load(out / "metrics" / "downstream.json")
+    a["evaluator"] = _load(out / "evaluator" / "evaluator.json")
+    a["is_image"] = bool(a["meta"].get("image_shape"))
     return a
 
 
@@ -157,7 +160,7 @@ def untraced_numbers(text, a):
     precision written. Percentages may also match a fraction (81.2% <-> 0.812)."""
     pool = []
     for src in (a["profile"], a["meta"], a["run_log"], list(a["metrics"].values()), list(a["runs"].values()),
-                a["plan"], a["recommendation"] or {}):
+                a["plan"], a["recommendation"] or {}, a["downstream"] or {}, a["evaluator"] or {}):
         _numbers_in(src, pool)
     missing = []
     for m in re.finditer(r"(?<![\w.])(-?\d+\.\d+)(%?)", text):
@@ -210,7 +213,17 @@ def guide_pages(a):
                   "so the spread between seeds is not a confidence interval and should not be read as one."
                   if multi else "Each model was trained with one seed, so stability across seeds was not checked."))
         blocks.append(("Run names and seeds", [line, why]))
-    if meta:
+    if meta and a["is_image"] and a["evaluator"]:
+        ev = a["evaluator"]
+        blocks.append(("Where realism is measured: the evaluation space", [
+            f"Images are compared in the {ev.get('feature_dim')}-dimensional feature space of a small CNN classifier trained on the "
+            f"real training images (held-out accuracy {ev.get('heldout_accuracy')}). This plays the role that Inception features play "
+            "in the usual FID: realism is judged by features that matter for recognizing these images. An ImageNet network would be a "
+            "poor judge of small, domain-specific images, and too heavy to run here. The classifier never sees synthetic or held-out "
+            "images during training, and the same classifier scores every model.",
+            "Its features only capture what helps tell the classes apart, so two image sets can look alike to it and still differ in "
+            "ways it ignores. The sample grid figure is the visual check. memorization_pixels repeats the DCR check on raw pixels."]))
+    elif meta:
         blocks.append(("Where realism is measured: the evaluation space", [
             f"Synthetic and held-out real samples are compared in one shared space: the first {meta.get('eval_components')} "
             f"principal components (PCs) of the transformed data, fit on the training split. These {meta.get('eval_components')} PCs "
@@ -233,6 +246,18 @@ def guide_pages(a):
         "of held-out DCRs (about 0.05 is expected without copying).",
         "This detects near-copies of training samples. It is not a privacy guarantee: it does not test membership inference, "
         "attribute inference, or any formal property such as differential privacy."]))
+    if any("conditional" in m for m in a["metrics"].values()):
+        blocks.append(("Do generated images belong to the requested class?", [
+            "label_agreement is the share of synthetic images that the evaluation classifier assigns to the class they were generated "
+            "for. Its reference is the classifier's accuracy on held-out real images, which is what a perfect class-conditional generator "
+            "would reach. Low agreement means the model's class conditioning is weak, which matters directly for class balancing."]))
+    if a["downstream"]:
+        blocks.append(("The class-balancing test", [
+            "The same classifier is trained on several training sets and scored on held-out real images: real data only (twice, with "
+            "two seeds), real data with the target class oversampled by duplication, and real data with the target class topped up "
+            "with each model's synthetic images. Synthetic images never enter the held-out set. The difference between the two "
+            "real-only runs is the noise level; an improvement smaller than that cannot be told apart from training noise. "
+            "Two runs give a rough yardstick, not a confidence interval."]))
     if any("representation" in m for m in a["metrics"].values()):
         blocks.append(("How the learned representation is judged", [
             "Trustworthiness (0 to 1) asks whether samples that are neighbors in the latent space are also neighbors in the full "
@@ -262,13 +287,23 @@ def summary_page(a, n):
     for k in a["keys"]:
         m = a["metrics"].get(k, {})
         f = m.get("fidelity", {})
-        rows.append(f"{k:<18} {m.get('family', ''):<6} C2ST {_fmt(f.get('c2st_auc'))} (real-vs-real {_fmt(f.get('c2st_auc_reference'))})"
-                    f"  precision {_fmt(f.get('precision'))}  recall {_fmt(f.get('recall'))}"
-                    f"  DCR ratio {_fmt(m.get('memorization', {}).get('dcr_ratio'))}")
+        if a["is_image"]:
+            rows.append(f"{k:<16} {m.get('family', ''):<9} FD {_fmt(f.get('frechet_distance'))} (ref {_fmt(f.get('frechet_distance_reference'))})"
+                        f"  C2ST {_fmt(f.get('c2st_auc'))} (ref {_fmt(f.get('c2st_auc_reference'))})"
+                        f"  label agr. {_fmt(m.get('conditional', {}).get('label_agreement'))}")
+        else:
+            rows.append(f"{k:<18} {m.get('family', ''):<6} C2ST {_fmt(f.get('c2st_auc'))} (real-vs-real {_fmt(f.get('c2st_auc_reference'))})"
+                        f"  precision {_fmt(f.get('precision'))}  recall {_fmt(f.get('recall'))}"
+                        f"  DCR ratio {_fmt(m.get('memorization', {}).get('dcr_ratio'))}")
     skipped = [e for e in a["run_log"].get("entries", []) if e.get("status") != "ok"]
     rows += [f"{e['key']:<18} {e['status']}" for e in skipped]
     guide = [_seed_line(a) + " The next page explains seeds, the evaluation space, references, and memorization."] if _seed_line(a) else []
     blocks.append(("Models run (headline metrics; details on the metrics page)", guide + ["```" + "\n".join(rows or ["none"]) + "```"]))
+    if a["downstream"]:
+        d = a["downstream"]
+        lines = [f"Target class(es) {', '.join(d['targets'])}; real-only seed spread (noise level) {_fmt(d.get('noise_level_target_f1'))}"]
+        lines += [f"{n:<28} target F1 {_fmt(r.get('target_f1'))}  macro F1 {_fmt(r.get('macro_f1'))}" for n, r in d["results"].items() if "target_f1" in r]
+        blocks.append(("Objective test: classifier on held-out real images", ["```" + "\n".join(lines) + "```"]))
     if a["recommendation"]:
         recs = [f"- [{u['verdict']}] {u['use']} ({u.get('model_key', '')})" for u in a["recommendation"]["uses"]]
         blocks.append(("Downstream-use verdicts", recs))
@@ -308,7 +343,7 @@ def data_page(a):
                                       f"Reason: {sp.get('reason', '')}"]))
     steps = [f"- {s['step']} {json.dumps(s.get('params')) if s.get('params') else ''}: {s.get('reason', '')}" for s in p.get("preprocessing", [])]
     blocks.append(("Preprocessing (applied identically for every model; fit on training data only)", steps or ["none"]))
-    if meta:
+    if meta and not a["is_image"]:
         blocks.append(("Evaluation space", [
             f"All models are scored in one shared space: PCA of the transformed data with {meta.get('eval_components')} components "
             f"({_fmt(meta.get('eval_variance_explained'))} of training variance), fit on the training split. The number of components "
@@ -330,6 +365,7 @@ def models_page(a):
             if r.get("model_id") == m["id"]:
                 lines.append(f"Training ({k}): {r['epochs_run']} of {r['epochs_planned']} max epochs, kept epoch {r['best_epoch']} "
                              f"({r['stop_reason']}); {r['minutes']} min on {r['device']}; {r['n_fit']} fit / {r['n_val']} validation samples"
+                             + (f"; {r['n_parameters']:,} parameters" if r.get("n_parameters") else "")
                              + (f"; input PCA keeps {_fmt(r['input_pca_variance_explained'])} of variance" if r.get("input_pca_variance_explained") else ""))
         blocks.append((m["id"], lines))
     if a["plan"].get("evaluation_notes"):
@@ -337,7 +373,7 @@ def models_page(a):
     return text_pages("Models, hyperparameters, and training", blocks)
 
 
-GROUPS = ["fidelity", "memorization", "feature_stats", "likelihood", "representation"]
+GROUPS = ["fidelity", "conditional", "memorization", "memorization_pixels", "feature_stats", "likelihood", "representation"]
 
 
 def metrics_pages(a):
@@ -361,12 +397,34 @@ def metrics_pages(a):
         if g == "likelihood":
             notes.add("Likelihoods are in each model's own input space and units; do not compare them across models with different input spaces.")
         blocks.append((g.replace("_", " ").capitalize(), ["```" + "\n".join(lines) + "```"] + sorted(notes)))
-    if a["meta"]:
+    if a["is_image"] and a["evaluator"]:
+        blocks.insert(0, (None, [f"Realism metrics use the {a['evaluator'].get('feature_dim')}-d feature space of the evaluation "
+                                 f"classifier (held-out accuracy {a['evaluator'].get('heldout_accuracy')}); per-pixel statistics use "
+                                 "all pixels. Each realism metric has a real-vs-real reference row."]))
+    elif a["meta"]:
         m = a["meta"]
         blocks.insert(0, (None, [f"Realism metrics use the {m.get('eval_components')}-component evaluation space "
                                  f"({100 * m.get('eval_variance_explained', 0):.1f}% of transformed-data variance); per-feature "
                                  "statistics use all features. Each realism metric has a real-vs-real reference row."]))
     return text_pages("Evaluation metrics (held-out real data)", blocks)
+
+
+def downstream_pages(a):
+    d = a["downstream"]
+    if not d:
+        return []
+    lines = [f"{'training set':<30}{'n_train':>9}{'target F1':>11}{'macro F1':>10}{'accuracy':>10}"]
+    for n, r in d["results"].items():
+        if "target_f1" in r:
+            lines.append(f"{n:<30}{r['n_train']:>9}{_fmt(r['target_f1']):>11}{_fmt(r['macro_f1']):>10}{_fmt(r['accuracy']):>10}")
+        else:
+            lines.append(f"{n:<30}  {r.get('status', '')}")
+    blocks = [(None, [f"Target class(es): {', '.join(d['targets'])}. Each was topped up to the largest training class "
+                      f"({', '.join(f'{t}: +{v}' for t, v in d['n_added_per_target'].items())} images). Classifier: {d['classifier']}.",
+                      "```" + "\n".join(lines) + "```",
+                      f"Noise level (target-F1 difference between the two real-only seeds): {_fmt(d.get('noise_level_target_f1'))}. {d.get('notes', '')}"])]
+    blocks.append(("Definitions", [f"- {k}: {v}" for k, v in d.get("definitions", {}).items()]))
+    return text_pages("Objective test: class balancing on held-out real data", blocks)
 
 
 def definitions_page(a):
@@ -378,9 +436,12 @@ def definitions_page(a):
 
 CAPTIONS = {
     "loss_curves": "Training curves. The validation set is 10% of the training split and decides early stopping; the held-out curve is shown for reference only and never used to choose anything.",
-    "real_vs_synthetic": "Held-out real samples (gray) and synthetic samples in the first two components of the shared evaluation space. Overlap in two components is necessary but not sufficient; the C2ST and MMD metrics use all components.",
+    "real_vs_synthetic": "Held-out real samples (gray) and synthetic samples in the first two principal components of the shared evaluation space (for images: of the evaluation classifier's features). Overlap in two components is necessary but not sufficient; the C2ST and MMD metrics use all components.",
     "feature_stats": "Per-feature mean and variance of synthetic vs held-out real data on the transformed scale. Points on the dashed line agree exactly.",
     "count_properties": "Count-level checks for models that generate counts: total counts per sample, and per-feature fraction of zeros.",
+    "sample_grid": "Held-out real images (first column block) and each model's samples, one row per class. Conditional models were asked for the class of the row; unconditional models' samples are not sorted by class.",
+    "label_agreement": "Per class: share of each model's images that the evaluation classifier assigns to the requested class; gray bars are the classifier's accuracy on held-out real images (the ceiling).",
+    "downstream": "Class-balancing test: F1 for the target class on held-out real images, for a classifier trained on each training set. The gray band spans the two real-only runs (training noise).",
     "latent": "Two-dimensional PCA of a VAE's latent codes for held-out samples. A picture for orientation; neighbor-preservation numbers are on the metrics page.",
 }
 
@@ -459,9 +520,16 @@ def limitations_pages(a, untraced):
     if _pca_models(a) and len(_pca_models(a)) < len(a["plan"].get("models", [])):
         items.append("Models trained on PCA scores are evaluated in a PCA space of the same data, which may favor them on the "
                      "shared realism metrics (see 'How to read this report').")
-    if a["meta"]:
+    if a["meta"] and not a["is_image"]:
         items.append(f"Fidelity is measured in a {a['meta'].get('eval_components')}-component PCA space "
                      f"({_fmt(a['meta'].get('eval_variance_explained'))} of training variance); differences outside it are not measured.")
+    if a["is_image"]:
+        items.append("Image realism is judged in the feature space of a classifier trained on the same real data; differences that do "
+                     "not affect classification (fine texture, staining details) are not measured by these numbers.")
+    d = a["downstream"]
+    if d:
+        items.append("The class-balancing test uses one classifier architecture and one seed per augmented training set; "
+                     f"differences below the real-only seed spread ({_fmt(d.get('noise_level_target_f1'))}) are not meaningful.")
     if not a["critique"]:
         items.append("No independent critique was run for this report.")
     if a["findings"]:
@@ -499,7 +567,8 @@ def build(dataset, n, allow_untraced=False):
             print(f"  {u}")
         sys.exit("ERROR: fix findings.md so every number comes from metrics/run/profile JSON, then rerun.")
 
-    pages = (summary_page(a, n) + guide_pages(a) + objective_page(a) + data_page(a) + models_page(a) + metrics_pages(a) + definitions_page(a)
+    pages = (summary_page(a, n) + guide_pages(a) + objective_page(a) + data_page(a) + models_page(a) + metrics_pages(a)
+             + downstream_pages(a) + definitions_page(a)
              + figure_pages(a) + findings_pages(a) + recommendation_pages(a) + critique_pages(a)
              + limitations_pages(a, untraced) + repro_pages(a, n))
 

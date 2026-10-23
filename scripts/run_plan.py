@@ -10,6 +10,8 @@
    - Each step runs as its own subprocess; a failing step is retried once, then that model/seed is
      skipped and recorded. One model failing never stops the others.
    - Models with status "not_run_budget" are recorded, not run.
+   - For class_balancing / augmentation objectives on labeled data, runs downstream_test.py after the
+     models (real vs real+resampled vs real+synthetic classifier, scored on held-out real data).
    - Writes outputs/<d>/run_log.json with per-model/seed status, minutes, and errors.
 """
 import argparse
@@ -100,6 +102,14 @@ def run_plan(plan_path):
             done_keys.append(key)
         entry["minutes"] = round((time.time() - t0) / 60, 2)
         log["entries"].append(entry)
+
+    objective = json.loads(plan_path.with_name("objective.json").read_text())
+    if done_keys and objective.get("effective_task") in ("class_balancing", "augmentation"):
+        bal = [k for k in done_keys if (outputs(dataset) / "samples" / f"{k}_balance_trans.npy").exists()]
+        print(f"[run_plan] downstream class-balancing test ({len(bal)} models with balancing samples)")
+        t0 = time.time()
+        ok, err = _run(["downstream_test.py", "--dataset", dataset, "--keys", ",".join(bal)], "downstream test")
+        log["downstream"] = {"status": "ok" if ok else f"failed: {err}", "keys": bal, "minutes": round((time.time() - t0) / 60, 2)}
 
     if done_keys:
         print("[run_plan] figures")

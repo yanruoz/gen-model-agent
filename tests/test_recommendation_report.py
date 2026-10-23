@@ -74,6 +74,7 @@ class TestRecommendation(unittest.TestCase):
 class TestNumberTracing(unittest.TestCase):
     def artifacts(self):
         return {"profile": {"n_samples": 2700}, "meta": {}, "run_log": {}, "plan": {}, "recommendation": None,
+                "downstream": None, "evaluator": None,
                 "metrics": {"k": {"fidelity": {"c2st_auc": 0.9457, "recall": 0.7667}}}, "runs": {}}
 
     def test_traced_numbers_pass(self):

@@ -8,6 +8,11 @@
      feature_stats.png          per-feature mean and variance, synthetic vs held-out real
      count_properties.png       total counts per sample and per-feature zero fraction (count models only)
      latent_<key>.png           2-D PCA of a VAE's latent codes for held-out samples
+   Image data instead gets:
+     sample_grid.png            per class (rows): real held-out images, then each model's samples
+     loss_curves.png            as above; GANs show discriminator and generator losses
+     label_agreement.png        per class: how often the real-data classifier assigns the requested class
+     downstream.png             class-balancing test: target-class F1 per training set (if run)
    Colors: held-out real data is always neutral gray; models take fixed categorical slots in plan
    order (never cycled), so a model keeps its color across every figure.
 """
@@ -33,11 +38,97 @@ plt.rcParams.update({
     "font.size": 9, "axes.edgecolor": INK_MUTED, "axes.labelcolor": INK, "xtick.color": INK_MUTED,
     "ytick.color": INK_MUTED, "axes.grid": True, "grid.color": GRID, "grid.linewidth": 0.6,
     "axes.spines.top": False, "axes.spines.right": False, "legend.frameon": False, "figure.dpi": 150, "savefig.dpi": 300,
+    "axes.axisbelow": True,
 })
 
 
 def _color(i):
     return SERIES[i % len(SERIES)] if i < len(SERIES) else "#555555"
+
+
+def _imgs(flat, shape):
+    return np.clip(flat.reshape(-1, *shape), 0, 1)
+
+
+def sample_grid(dataset, keys, prepared, fig_dir, per=6):
+    shape = tuple(prepared["meta"]["image_shape"])
+    classes = prepared["meta"].get("classes") or ["all"]
+    y_te = prepared.get("y_test")
+    sources = [("held-out real", prepared["trans_test"], y_te)]
+    for k in keys:
+        yk = outputs(dataset) / "samples" / f"{k}_y.npy"
+        sources.append((k, np.load(outputs(dataset) / "samples" / f"{k}_trans.npy"), np.load(yk) if yk.exists() else None))
+    rows, cols = len(classes), len(sources)
+    fig, axes = plt.subplots(rows, cols, figsize=(1.55 * per * cols / 3, 1.55 * rows / 1.5 + 0.6), squeeze=False)
+    for j, (name, x, y) in enumerate(sources):
+        for i, c in enumerate(classes):
+            ax = axes[i][j]
+            idx = np.flatnonzero(y == c)[:per] if y is not None else np.arange(i * per, (i + 1) * per)
+            if len(idx):
+                tile = np.concatenate(list(_imgs(x[idx], shape)), axis=1)  # one row of `per` images
+                ax.imshow(tile, interpolation="nearest")
+            ax.set_xticks([]); ax.set_yticks([]); ax.grid(False)
+            for sp in ax.spines.values():
+                sp.set_visible(False)
+            if j == 0:
+                ax.set_ylabel(f"class {c}", fontsize=7, rotation=0, ha="right", va="center")
+            if i == 0:
+                ax.set_title(name, fontsize=8, color=INK)
+    fig.suptitle("Held-out real images and generated images, by class (rows)", fontsize=11, color=INK, x=0.01, ha="left")
+    fig.tight_layout()
+    fig.savefig(fig_dir / "sample_grid.png")
+    plt.close(fig)
+
+
+def label_agreement(dataset, keys, colors, fig_dir):
+    ms = {k: json.loads((outputs(dataset) / "metrics" / f"{k}.json").read_text()) for k in keys
+          if (outputs(dataset) / "metrics" / f"{k}.json").exists()}
+    ms = {k: m["conditional"] for k, m in ms.items() if "conditional" in m}
+    if not ms:
+        return
+    classes = list(next(iter(ms.values()))["per_class_agreement"])
+    ref = next(iter(ms.values())).get("per_class_heldout_accuracy", {})
+    fig, ax = plt.subplots(figsize=(8.0, 3.4))
+    w = 0.8 / (len(ms) + 1)
+    xs = np.arange(len(classes))
+    ax.bar(xs - 0.4 + w / 2, [ref.get(c, 0) for c in classes], width=w * 0.92, color=REAL, label="held-out real (reference)")
+    for i, (k, m) in enumerate(ms.items(), 1):
+        ax.bar(xs - 0.4 + w / 2 + i * w, [m["per_class_agreement"][c] for c in classes], width=w * 0.92, color=colors[k], label=k)
+    ax.set_xticks(xs, [f"class {c}" for c in classes], fontsize=7)
+    ax.set_ylim(0, 1.05); ax.set_ylabel("classifier assigns requested class")
+    ax.legend(fontsize=7, ncol=len(ms) + 1, loc="lower left", bbox_to_anchor=(0, 1.0))
+    ax.set_title("Label agreement: does a classifier trained on real images recognize the requested class?",
+                 fontsize=9, color=INK, loc="left", pad=22)
+    fig.tight_layout()
+    fig.savefig(fig_dir / "label_agreement.png")
+    plt.close(fig)
+
+
+def downstream(dataset, colors, fig_dir):
+    f = outputs(dataset) / "metrics" / "downstream.json"
+    if not f.exists():
+        return
+    d = json.loads(f.read_text())
+    res = {k: v for k, v in d["results"].items() if "target_f1" in v}
+    names = list(res)
+    fig, ax = plt.subplots(figsize=(7.6, 0.45 * len(names) + 1.4))
+    for i, n in enumerate(names):
+        key = n.replace("real_plus_", "")
+        c = colors.get(key, REAL)
+        ax.barh(i, res[n]["target_f1"], color=c, height=0.6)
+        ax.text(res[n]["target_f1"] + 0.003, i, f"{res[n]['target_f1']:.4f}", va="center", fontsize=7, color=INK)
+    base = np.mean([res[n]["target_f1"] for n in names if n.startswith("real_seed")])
+    noise = d.get("noise_level_target_f1", 0)
+    ax.axvspan(base - noise, base + noise, color=REAL, alpha=0.18, lw=0, label="real-only seed spread")
+    ax.set_yticks(range(len(names)), names, fontsize=7); ax.invert_yaxis()
+    lo = min(res[n]["target_f1"] for n in names)
+    ax.set_xlim(max(0, lo - 0.1), 1.0)
+    ax.set_xlabel(f"F1 for target class {', '.join(d['targets'])} on held-out real images")
+    ax.legend(fontsize=7, loc="lower right")
+    ax.set_title("Class-balancing test: classifier trained on each training set", fontsize=9, color=INK, loc="left")
+    fig.tight_layout()
+    fig.savefig(fig_dir / "downstream.png")
+    plt.close(fig)
 
 
 def loss_curves(dataset, keys, colors, fig_dir):
@@ -46,6 +137,12 @@ def loss_curves(dataset, keys, colors, fig_dir):
         run = json.loads((outputs(dataset) / "runs" / f"{key}.json").read_text())
         h = run["history"]
         ep = [r["epoch"] for r in h]
+        if run["family"] == "gan":
+            ax.plot(ep, [r["d_loss"] for r in h], color=colors[key], lw=1.6, label="discriminator")
+            ax.plot(ep, [r["g_loss"] for r in h], color=colors[key], lw=1.6, ls="--", label="generator")
+            ax.set_title(key, fontsize=9, color=INK); ax.set_xlabel("epoch"); ax.set_ylabel(run["loss_definition"])
+            ax.legend(fontsize=7, loc="upper right")
+            continue
         ax.plot(ep, [r["loss"] for r in h], color=colors[key], lw=1.6, label="train")
         ax.plot(ep, [r["val_loss"] for r in h], color=colors[key], lw=1.6, ls="--", label="validation (from train)")
         ho = [(r["epoch"], r["heldout_loss"]) for r in h if "heldout_loss" in r]
@@ -67,17 +164,31 @@ def loss_curves(dataset, keys, colors, fig_dir):
 
 
 def real_vs_synthetic(dataset, keys, colors, prepared, fig_dir):
-    ev_te = prepared["eval_test"]
+    image = bool(prepared["meta"].get("image_shape"))
+    if image:
+        # Images are evaluated in the evaluation classifier's feature space, so plot PCs of those features
+        # (PCA fit on held-out real features), not of raw pixels.
+        from image_eval import features, get_evaluator
+        evaluator, _ = get_evaluator(dataset, prepared)
+        f_te = features(evaluator, prepared["trans_test"])
+        pca2 = PCA(n_components=2, random_state=0).fit(f_te)
+        ev_te = pca2.transform(f_te)
+        project = lambda k: pca2.transform(features(evaluator, np.load(outputs(dataset) / "samples" / f"{k}_trans.npy")))
+        axis_name, title = "feature PC", "Held-out real vs synthetic images, first two PCs of the evaluation classifier's features"
+    else:
+        ev_te = prepared["eval_test"]
+        project = lambda k: to_eval_space(np.load(outputs(dataset) / "samples" / f"{k}_trans.npy").astype(np.float64), prepared["state"])
+        axis_name, title = "eval PC", "Held-out real vs synthetic samples, first two evaluation PCs"
     fig, axes = plt.subplots(1, len(keys), figsize=(3.6 * len(keys), 3.5), squeeze=False, sharex=True, sharey=True)
     for ax, key in zip(axes[0], keys):
-        syn = to_eval_space(np.load(outputs(dataset) / "samples" / f"{key}_trans.npy").astype(np.float64), prepared["state"])
+        syn = project(key)
         ax.scatter(ev_te[:, 0], ev_te[:, 1], s=6, c=REAL, alpha=0.55, lw=0, label="held-out real")
         ax.scatter(syn[:, 0], syn[:, 1], s=6, c=colors[key], alpha=0.55, lw=0, label=f"synthetic ({key})")
         ax.set_title(key, fontsize=9, color=INK)
-        ax.set_xlabel("eval PC1")
+        ax.set_xlabel(f"{axis_name}1")
         ax.legend(fontsize=7, loc="best", markerscale=2)
-    axes[0][0].set_ylabel("eval PC2")
-    fig.suptitle("Held-out real vs synthetic samples, first two evaluation PCs", fontsize=11, color=INK, x=0.01, ha="left")
+    axes[0][0].set_ylabel(f"{axis_name}2")
+    fig.suptitle(title, fontsize=11, color=INK, x=0.01, ha="left")
     fig.tight_layout()
     fig.savefig(fig_dir / "real_vs_synthetic.png")
     plt.close(fig)
@@ -163,6 +274,14 @@ def visualize(dataset, keys):
     fig_dir.mkdir(exist_ok=True)
     colors = {k: _color(i) for i, k in enumerate(keys)}
     loss_curves(dataset, keys, colors, fig_dir)
+    if prepared["meta"].get("image_shape"):
+        sample_grid(dataset, keys, prepared, fig_dir)
+        label_agreement(dataset, keys, colors, fig_dir)
+        downstream(dataset, colors, fig_dir)
+        real_vs_synthetic(dataset, keys, colors, prepared, fig_dir)
+        latent_plots(dataset, keys, prepared, fig_dir)
+        print(f"[visualize] figures -> {fig_dir}")
+        return
     real_vs_synthetic(dataset, keys, colors, prepared, fig_dir)
     feature_stats(dataset, keys, colors, prepared, fig_dir)
     count_properties(dataset, keys, colors, prepared, fig_dir)

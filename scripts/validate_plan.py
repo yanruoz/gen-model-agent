@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 from plan_schema import (
-    IMPLEMENTED, INPUT_SPACES, KNOWN_PREPROCESSING_STEPS, LIKELIHOODS, MIN_SEEDS, MIN_TRAIN_SAMPLES,
+    IMAGE_HYPERPARAMS, IMPLEMENTED, INPUT_SPACES, KNOWN_PREPROCESSING_STEPS, LIKELIHOODS, MIN_SEEDS, MIN_TRAIN_SAMPLES,
     MODEL_FAMILIES, MODEL_STATUSES, NONNEG_ONLY_STEPS, OBJECTIVE_TASKS, REQUIRED_HYPERPARAMS,
     STEP_KIND_ORDER, TEST_FRACTION_RANGE, is_lazy_reason, serves,
 )
@@ -100,9 +100,19 @@ def _check_model(m, plan, profile, objective, n_train, errors, warnings):
         errors.append(f"model {mid}: input_space must be one of {sorted(INPUT_SPACES)}")
     hp = m.get("hyperparameters") or {}
     reasons = m.get("hyperparameter_reasons") or {}
-    missing = REQUIRED_HYPERPARAMS[family] - set(hp)
+    needed = REQUIRED_HYPERPARAMS[family] | (IMAGE_HYPERPARAMS.get(family, set()) if modality == "image" else set())
+    missing = needed - set(hp)
     if missing:
         errors.append(f"model {mid}: missing hyperparameters {sorted(missing)}")
+    if modality == "image":
+        # Conv models read pixels scaled to [0, 1] in their image shape: the 'transformed' view after scale_unit_range.
+        if space != "transformed":
+            errors.append(f"model {mid}: image models train on input_space 'transformed' (pixels after scale_unit_range)")
+        if "scale_unit_range" not in [s.get("step") for s in plan.get("preprocessing", [])]:
+            errors.append(f"model {mid}: image models need the scale_unit_range preprocessing step")
+        if family == "diffusion" and isinstance(hp.get("timesteps"), int) and isinstance(hp.get("sampling_steps"), int) \
+                and hp["sampling_steps"] > hp["timesteps"]:
+            errors.append(f"model {mid}: sampling_steps cannot exceed timesteps")
     if space == "pca":
         missing_pca = "pca_components" not in hp
         if missing_pca:

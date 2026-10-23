@@ -59,6 +59,9 @@ MIN_SEEDS = {"gan": 2}
 IMPLEMENTED = {
     ("vae", "tabular", False),
     ("flow", "tabular", False),
+    ("vae", "image", False), ("vae", "image", True),              # conv VAE / conditional VAE
+    ("gan", "image", False), ("gan", "image", True),              # DCGAN-style, projection discriminator
+    ("diffusion", "image", False), ("diffusion", "image", True),  # small UNet, classifier-free guidance
 }
 
 # What the model is trained on (built by preprocess.py, fit on the training split only):
@@ -75,6 +78,12 @@ REQUIRED_HYPERPARAMS = {
     "flow":      {"n_layers", "hidden_dim", "epochs", "batch_size", "lr"},
     "gan":       {"latent_dim", "epochs", "batch_size", "lr"},
     "diffusion": {"timesteps", "epochs", "batch_size", "lr"},
+}
+# Extra hyperparameters the image (convolutional) versions read.
+IMAGE_HYPERPARAMS = {
+    "vae":       {"base_channels"},
+    "gan":       {"base_channels"},
+    "diffusion": {"base_channels", "sampling_steps", "guidance_scale"},
 }
 
 # ── Preprocessing ──

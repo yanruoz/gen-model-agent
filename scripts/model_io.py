@@ -10,6 +10,7 @@ import numpy as np
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from models.conv import CondDiffusion, CondGAN, ConvVAE  # noqa: E402
 from models.flow import RealNVP  # noqa: E402
 from models.vae import VAE  # noqa: E402
 
@@ -72,8 +73,16 @@ def model_input(entry, prepared, split, input_pca=None):
     return ((trans - input_pca["mean"]) @ input_pca["components"].T).astype(np.float32)
 
 
-def build(entry, n_in, n_classes=0):
+def build(entry, n_in, n_classes=0, image_shape=None):
+    """n_classes > 0 only for conditional models; image_shape set for image data (conv models)."""
     hp = entry["hyperparameters"]
+    if image_shape is not None:
+        if entry["family"] == "vae":
+            return ConvVAE(image_shape, hp["latent_dim"], hp["base_channels"], hp["likelihood"], n_classes, hidden=hp["hidden_dims"][0])
+        if entry["family"] == "gan":
+            return CondGAN(image_shape, hp["latent_dim"], hp["base_channels"], n_classes)
+        if entry["family"] == "diffusion":
+            return CondDiffusion(image_shape, hp["timesteps"], hp["base_channels"], n_classes)
     if entry["family"] == "vae":
         return VAE(n_in, hp["latent_dim"], hp["hidden_dims"], hp["likelihood"], n_classes)
     if entry["family"] == "flow":
@@ -87,6 +96,6 @@ def save_checkpoint(path, model, extra):
 
 def load_checkpoint(dataset, key, device="cpu"):
     ckpt = torch.load(outputs(dataset) / "checkpoints" / f"{key}.pt", map_location=device, weights_only=False)
-    model = build(ckpt["entry"], ckpt["n_in"], ckpt.get("n_classes", 0))
+    model = build(ckpt["entry"], ckpt["n_in"], ckpt.get("n_classes", 0), ckpt.get("image_shape"))
     model.load_state_dict(ckpt["state_dict"])
     return model.to(device).eval(), ckpt

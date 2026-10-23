@@ -28,7 +28,7 @@ from plan_schema import EVAL_PCA_COMPONENTS, FEATURE_STEPS, ROW_STEPS, TRANSFORM
 
 OUTPUTS = Path(__file__).resolve().parent.parent / "outputs"
 # Bump when this file's output changes for the same plan, so cached prepared/ data is not reused.
-PREP_VERSION = 3
+PREP_VERSION = 4
 
 
 def prep_hash(plan):
@@ -228,7 +228,8 @@ def prepare(plan, out_root=OUTPUTS):
         "eval_half_split_cumulative_ratios": [round(float(r), 3) for r in var_ratios],
         "eval_variance_explained": round(float(pca.explained_variance_ratio_.sum()), 4),
         "transforms": transform_names, "image_shape": metadata.get("image_shape") and list(metadata["image_shape"]),
-        "has_labels": y is not None, "is_count_raw": bool(np.all(raw_tr == np.round(raw_tr)) and raw_tr.min() >= 0),
+        "has_labels": y is not None,
+        "classes": sorted(set(np.asarray(y).astype(str).tolist())) if y is not None else None, "is_count_raw": bool(np.all(raw_tr == np.round(raw_tr)) and raw_tr.min() >= 0),
         "feature_names": [names[i] for i in feat_idx] if names else None,
     }
     meta_path.write_text(json.dumps(meta, indent=2) + "\n")

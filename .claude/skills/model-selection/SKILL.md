@@ -63,7 +63,8 @@ Rules (the first match sets the primary model; add one comparator where the budg
 - **data_generation, tabular** → the VAE above as primary, plus a **flow on `pca`** as a comparator: an exact-likelihood model with a different inductive bias, scored in the same evaluation space. A GAN is allowed only with a dataset-specific reason; on a few thousand rows it is the least stable choice.
 - **anomaly_detection / uncertainty_quantification** → flow (exact likelihood), on `pca` for high-dimensional data, with the VAE's ELBO as a cross-check. A GAN is invalid here (no likelihood).
 - **imputation** → VAE (reconstruction). Diffusion inpainting for images only if the budget allows.
-- **class_balancing / augmentation on images** → conditional models compared: conditional VAE (fast baseline), conditional GAN with 2 seeds, conditional diffusion (or `not_run_budget`).
+- **class_balancing / augmentation on images** → three conditional models compared (`conditional: true`, all on `input_space: transformed` after `scale_unit_range`): conditional VAE (fast baseline, expect blurry samples), conditional GAN with 2 seeds, conditional diffusion. If diffusion doesn't fit the budget, keep it with `status: not_run_budget`. `run_plan.py` then runs the downstream test automatically: the same classifier is trained on real data, real data with resampling, and real data plus each model's target-class samples, and all are scored on held-out real data. That test is what the recommendation rests on.
+- **data_generation on images** → unconditional or conditional diffusion if the budget allows, otherwise GAN (2 seeds); a VAE only as a fast baseline.
 
 Don't add models just to fill the table: each one needs a reason tied to the objective, and it needs a comparison the evaluation can actually make.
 
@@ -84,6 +85,12 @@ Don't add models just to fill the table: each one needs a reason tied to the obj
 - `n_layers`: 6–8 coupling layers. `hidden_dim`: 128 (256 above 20k samples).
 - `epochs`, `batch_size`, `lr`: as for the VAE (epochs is a maximum, early stopping applies); `lr` 1e-3.
 
+**Image models** (28x28-scale images, a few thousand to tens of thousands of training images)
+- Conditional VAE: `latent_dim` 32, `base_channels` 32, `hidden_dims` [256], `likelihood` "bernoulli" (pixels in [0, 1]), `kl_warmup_epochs` about 10% of epochs, `epochs` 60 (maximum; early stopping applies), `batch_size` 128, `lr` 1e-3. Expect blurry means; that is the known VAE trade-off, and the reason to compare it with sharper families.
+- Conditional GAN: `latent_dim` 64, `base_channels` 64, `epochs` 20–30 (a fixed count: GANs are not early-stopped because their losses don't measure sample quality), `batch_size` 128, `lr` 2e-4, `seeds` [0, 1].
+- Conditional diffusion: `timesteps` 400, `base_channels` 32, `sampling_steps` 50 (DDIM), `batch_size` 128, `lr` 2e-4. Diffusion keeps improving with training much longer than the other families, so give it the largest share of the budget that fits (`epochs` as the budget allows; early stopping applies). `guidance_scale` trades diversity for class fidelity; 2–4 is the usual range, and the upper end suits class balancing, where producing the requested class matters most.
+- Subsampling: with a 20–30 min budget and these three families, about 20,000 images (stratified) keeps every model's training to minutes. State the time arithmetic in the reason.
+
 **Seeds**: one seed is enough for a stable family (VAE, flow) under a tight budget; give it 2 if the budget allows and the claim depends on stability. GANs: always >= 2.
 
 ## Timing table (Apple M4 CPU/MPS; per seed)
@@ -94,3 +101,13 @@ Measured on this machine for training to the maximum epochs (generation + evalua
 |---|---|---|---|
 | VAE (nb), CPU | ~2,000 samples x 2,000 features | 400 epochs, batch 128, [256, 128] | 0.9 |
 | Flow (RealNVP), CPU | ~2,000 samples x 20 dims | 8 layers, hidden 128, 400 epochs | ~0.2 |
+
+Images, Apple MPS, ~14,000 training images of 28x28x3 (per epoch; multiply by epochs, scale linearly with image count):
+
+| Model | Setting | Seconds per epoch |
+|---|---|---|
+| Conditional VAE | base 32, latent 32 | ~2 |
+| Conditional GAN | base 64, latent 64 | ~8 |
+| Conditional diffusion | base 32, 400 timesteps | ~12–13 |
+
+Not part of `budget_min` but part of the run's wall-clock time: diffusion sampling takes about 0.02 s per image (50 guided steps), each image model's evaluation about 1 min, training the evaluation classifier once about 1 min, and the class-balancing test about 4 min.
