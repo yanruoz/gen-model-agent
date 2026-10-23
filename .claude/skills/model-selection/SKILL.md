@@ -75,22 +75,22 @@ Don't add models just to fill the table: each one needs a reason tied to the obj
 - `latent_dim`: 10 when `n_train` < 5,000; 16 up to 50,000; 32 above. A small latent space is enough for a few thousand samples and gives a representation that is easy to inspect. More dimensions mostly fit noise at this size.
 - `hidden_dims`: `[256, 128]` when the input has >= 1,000 features, else `[128, 64]`.
 - `batch_size`: 128 (for `n_train` < 1,000, use 64 so an epoch has more than a handful of steps).
-- `epochs`: aim for roughly 5,000–10,000 gradient steps: `epochs ≈ 7,500 / ceil(n_train / batch_size)`, clipped to [50, 400]. For 2,160 cells at batch 128 (17 steps/epoch), that is about 440, so 400.
+- `epochs`: a **maximum**. `train.py` always sets aside 10% of the training split for validation, stops when validation loss hasn't improved for 25 epochs, and keeps the best weights, so too many epochs costs time, not overfitting. Use 300–400 for a few thousand samples, and lower it only to fit the budget. (On PBMC, held-out loss bottomed out near epoch 70 and rose after; early stopping caught it.)
 - `kl_warmup_epochs`: about 10% of epochs. Ramping the KL weight from 0 to 1 avoids posterior collapse early in training.
 - `lr`: 1e-3 (Adam). Lower to 5e-4 if the loss curve from a previous run oscillates.
 
 **Flow (RealNVP, affine coupling)**
-- `pca_components`: density estimation needs many samples per dimension. Use 10–20 when `n_train` < 5,000, up to 50 above that, and state the variance this keeps (from the preprocessing/eval PCA if known).
+- `pca_components`: density estimation needs many samples per dimension. Use 10–20 when `n_train` < 5,000, up to 50 above that. The variance the components keep is recorded in the run sidecar (`input_pca_variance_explained`). When generating, the flow adds independent Gaussian noise with the training residual variance outside these components, so its samples are full-dimensional. Say in the reason that the flow models the top components and treats the rest as noise.
 - `n_layers`: 6–8 coupling layers. `hidden_dim`: 128 (256 above 20k samples).
-- `epochs`, `batch_size`, `lr`: same step-count rule as the VAE; `lr` 1e-3.
+- `epochs`, `batch_size`, `lr`: as for the VAE (epochs is a maximum, early stopping applies); `lr` 1e-3.
 
 **Seeds**: one seed is enough for a stable family (VAE, flow) under a tight budget; give it 2 if the budget allows and the claim depends on stability. GANs: always >= 2.
 
 ## Timing table (Apple M4 CPU/MPS; per seed)
 
-Measured on this machine; use it for `estimated_minutes` and round up.
+Measured on this machine (training only; generation + evaluation add about 0.2 min per model on PBMC). Use these for `estimated_minutes` and round up generously. Early stopping usually ends sooner than the maximum, but the estimate should cover the maximum.
 
-| Model | Data | Setting | Minutes |
-|---|---|---|---|
-| VAE (nb) | 2,160 x 2,000 counts | 400 epochs, batch 128 | TBD |
-| Flow | 2,160 x 20 PCA | 8 layers, 400 epochs | TBD |
+| Model | Data | Setting | Minutes (to max epochs) | Observed with early stopping |
+|---|---|---|---|---|
+| VAE (nb), CPU | 1,944 x 2,000 counts | 400 epochs, batch 128, [256, 128] | 0.9 | 0.17 (stopped at 91) |
+| Flow (RealNVP), CPU | 1,944 x 20 PCA | 8 layers, hidden 128, 400 epochs | ~0.2 | 0.02 (stopped at 38) |
