@@ -1,6 +1,6 @@
 ---
 name: model-selection
-description: Choose generative model(s) and hyperparameters for the validated objective, and the full plan.json schema. Used in step 4 of CLAUDE.md, right after data-profiling decides split and preprocessing.
+description: Choose generative model(s) and hyperparameters for the validated objective, and the full plan.json schema. Used in step 4 of AGENT.md, right after data-profiling decides split and preprocessing.
 ---
 
 # Model selection and plan.json schema
@@ -9,7 +9,7 @@ description: Choose generative model(s) and hyperparameters for the validated ob
 
 ```json
 {
-  "dataset": "pbmc",
+  "dataset": "<dataset>",
   "seed": 0,
   "budget_min": 20,
   "split": {"test_fraction": 0.2, "stratify": false, "reason": "..."},

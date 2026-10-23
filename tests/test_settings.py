@@ -1,6 +1,6 @@
-"""Pipeline runs load both .claude/settings.json (dev) and .claude/pipeline-settings.json, because
-skipping the project settings source would also skip CLAUDE.md. Deny beats allow across sources, so
-every dev allow rule must be covered by a pipeline deny rule, or it would leak into pipeline runs.
+"""Pipeline runs use --setting-sources local, so the dev .claude/settings.json does not load at all.
+As a second line of defense (e.g. if someone drops that flag), every dev allow rule must still be
+covered by a pipeline deny rule; deny beats allow across settings sources.
 
 Run from the repo root:  venv/bin/python -m unittest discover -s tests -v
 """

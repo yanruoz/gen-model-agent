@@ -20,12 +20,12 @@ venv/bin/python scripts/validate_recommendation.py outputs/<dataset>/recommendat
   "uses": [
     {
       "task": "representation_learning",
-      "use": "Use the VAE latent codes (10 dims) as the input to clustering or neighbor graphs of these cells",
+      "use": "Use the VAE latent codes as the input to clustering or neighbor graphs of these samples",
       "model_key": "vae_nb_s0",
       "verdict": "recommended | conditional | not_recommended",
       "evidence": [
-        {"metric": "vae_nb_s0.representation.trustworthiness", "value": 0.8073,
-         "compared_to": "vae_nb_s0.representation.trustworthiness_pca_baseline = 0.8328"}
+        {"metric": "vae_nb_s0.representation.trustworthiness", "value": 0.81,
+         "compared_to": "vae_nb_s0.representation.trustworthiness_pca_baseline = 0.83"}
       ],
       "rationale": "What the evidence shows for this use, in one or two sentences",
       "caveats": ["Conditions or limits on the use"]
@@ -44,7 +44,7 @@ venv/bin/python scripts/validate_recommendation.py outputs/<dataset>/recommendat
 
 Compare against the **reference** values stored next to each metric, not against an imagined ideal:
 
-- **Fidelity:** `c2st_auc` vs `c2st_auc_reference`. A C2ST AUC close to the reference means synthetic samples are hard to tell from real ones. Well above it (e.g. 0.85 vs 0.59) means a classifier separates them easily. Then synthetic samples can't stand in for real data in analyses that are sensitive to the joint distribution, though they may still be fine for uses that only need marginals (check `feature_stats`). MMD works the same way against `mmd2_reference`. Precision and recall separately say whether samples are realistic (precision) and whether they cover the real variety (recall).
+- **Fidelity:** `c2st_auc` vs `c2st_auc_reference`. A C2ST AUC close to the reference means synthetic samples are hard to tell from real ones. Well above it (e.g. 0.9 vs a reference of 0.55) means a classifier separates them easily. Then synthetic samples can't stand in for real data in analyses that are sensitive to the joint distribution, though they may still be fine for uses that only need marginals (check `feature_stats`). MMD works the same way against `mmd2_reference`. Precision and recall separately say whether samples are realistic (precision) and whether they cover the real variety (recall).
 - **Representation:** `trustworthiness` and `knn_overlap` against their PCA baselines. A latent space that doesn't beat a same-size PCA isn't useless, but the recommendation must say a PCA would do about as well for neighbor-based uses. Recommend it only for what it adds (e.g. a count-aware model of the data, a generator for the same space).
 - **Memorization:** `dcr_ratio` well below 1, or `too_close_fraction` far above 0.05, means synthetic samples sit close to training samples. Treat as a red flag for any sharing use.
 - **Training:** read `run_log.json` and the run sidecars. A model stopped by the time cap, or with a large train-to-held-out gap, gets a caveat.

@@ -30,7 +30,7 @@ def generate(dataset, key, n=None):
 
     space = entry["input_space"]
     if entry["family"] == "vae" and entry["hyperparameters"]["likelihood"] == "nb":
-        # New cells get library sizes resampled from the training cells' observed totals.
+        # New samples get library sizes resampled from the training samples' observed totals.
         library = torch.from_numpy(rng.choice(ckpt["train_library"], size=n, replace=True)).unsqueeze(1)
         raw = model.sample(n, library=library).numpy()                   # (n, d) counts
         np.save(out_dir / f"{key}_raw.npy", raw.astype(np.float32))

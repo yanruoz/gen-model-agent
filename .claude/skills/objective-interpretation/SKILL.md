@@ -1,6 +1,6 @@
 ---
 name: objective-interpretation
-description: Turn the user's free-text objective into outputs/<dataset>/objective.json (task, decision whether to model at all, success criterion), checked by validate_objective.py. Used in step 3 of CLAUDE.md, after profiling and before preprocessing/model selection.
+description: Turn the user's free-text objective into outputs/<dataset>/objective.json (task, decision whether to model at all, success criterion), checked by validate_objective.py. Used in step 3 of AGENT.md, after profiling and before preprocessing/model selection.
 ---
 
 # Objective interpretation
@@ -32,7 +32,7 @@ Fix and re-run until it passes. The validator enforces the data checks below in 
 
 ## Step 1: map words to a task
 
-Pick exactly one primary `task` from `plan_schema.OBJECTIVE_TASKS`. Add `secondary_tasks` only when the objective asks for two things explicitly ("learn a representation **and** generate cells").
+Pick exactly one primary `task` from `plan_schema.OBJECTIVE_TASKS`. Add `secondary_tasks` only when the objective asks for two things explicitly ("learn a representation **and** generate samples").
 
 | The objective talks about... | Task |
 |---|---|
@@ -44,7 +44,7 @@ Pick exactly one primary `task` from `plan_schema.OBJECTIVE_TASKS`. Add `seconda
 | embedding, latent space, low-dimensional representation, features for clustering | `representation_learning` |
 | confidence, likelihood, calibrated density, "how sure" | `uncertainty_quantification` |
 
-If the objective is vague ("do something useful with this data"), pick the task that the data supports best and that the evaluation can actually measure, and list the other plausible readings in `ambiguities`. Never stop to ask: record the judgment call (CLAUDE.md rule on assumptions).
+If the objective is vague ("do something useful with this data"), pick the task that the data supports best and that the evaluation can actually measure, and list the other plausible readings in `ambiguities`. Never stop to ask: record the judgment call (AGENT.md rule 8 on assumptions).
 
 ## Step 2: decide whether to model at all
 
@@ -60,8 +60,8 @@ Check each against `profile.json`, in order. The validator enforces the first th
 
 One sentence naming the measurement on **held-out real data** that decides success. Examples:
 - representation_learning: "held-out reconstruction likelihood is close to the training value, and the latent space preserves nearest-neighbor structure (trustworthiness) of the log-normalized data".
-- data_generation: "a classifier cannot tell synthetic from held-out real cells well (C2ST AUC close to 0.5), and synthetic cells are no closer to training cells than held-out real cells are".
-- class_balancing: "minority-class F1 on held-out real images improves over real data plus simple resampling".
+- data_generation: "a classifier cannot tell synthetic from held-out real samples well (C2ST AUC close to its real-vs-real reference), and synthetic samples are no closer to training samples than held-out real samples are".
+- class_balancing: "minority-class F1 on held-out real data improves over real data plus simple resampling".
 
 ## Target class
 

@@ -3,9 +3,9 @@
    section of that dataset's DATA_DESCRIPTION.md, and verifies `md5:` if one is
    declared. Any dataset can declare these, none is special-cased.
 
-   The analysis pipeline itself never touches the network (CLAUDE.md rule 5),
+   The analysis pipeline itself never touches the network (AGENT.md rule 4),
    so a fresh clone runs this once before anything else:
-       python scripts/fetch_data.py --dataset pbmc
+       venv/bin/python scripts/fetch_data.py --dataset <name>
 """
 import argparse
 import hashlib

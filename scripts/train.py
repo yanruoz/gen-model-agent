@@ -129,7 +129,7 @@ def train(dataset, model_id, seed):
     ck_dir.mkdir(exist_ok=True); run_dir.mkdir(exist_ok=True)
     extra = {"entry": entry, "n_in": n_in, "seed": seed, "input_pca": input_pca}
     if family == "vae" and hp["likelihood"] == "nb":
-        # Empirical library sizes of the training cells; resampled when generating new cells.
+        # Empirical library sizes (total counts) of the training samples; resampled when generating.
         extra["train_library"] = prepared["raw_train"].sum(1).astype(np.float32)
     save_checkpoint(ck_dir / f"{key}.pt", model.cpu(), extra)
 

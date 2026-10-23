@@ -15,7 +15,7 @@ Project 1 (dimension-reduction agent) lives at `../dim-reduction-agent`. Its han
 
 ## How it runs
 
-- Entry point: `./run.sh <dataset> "<objective>"`. It prepares `venv/` and the data, then runs Claude Code headless (`claude -p --permission-mode dontAsk`) with this file as the agent's instructions. Tools outside the allowlist in `.claude/pipeline-settings.json` are denied, never prompted. `.claude/settings.json` holds dev settings for interactive sessions only. Runs use the Claude Code login unless `--use-api-key` is passed.
-- Every command goes through `venv/bin/python` / `venv/bin/pip`, never a system or conda interpreter (Project 1 incident, see HANDOFF §6).
-- The pipeline agent's instructions live in `AGENT.md`, which `run.sh` appends to the system prompt. This file (CLAUDE.md) is for development sessions. Change pipeline behavior in `AGENT.md`, the skills under `.claude/skills/`, or the scripts, not here.
+- Entry point: `./run.sh <dataset> "<objective>"`. It prepares `venv/` and the data, then runs Claude Code headless (`claude -p --permission-mode dontAsk`) with `AGENT.md` as the agent's instructions. Tools outside the allowlist in `.claude/pipeline-settings.json` are denied, never prompted. `.claude/settings.json` holds dev settings for interactive sessions only. Runs use the Claude Code login unless `--use-api-key` is passed.
+- Every command goes through `venv/bin/python` / `venv/bin/pip`, never a system or conda interpreter (a bare `pip install` once modified a system-wide conda environment).
+- The pipeline agent's instructions live in `AGENT.md`, which `run.sh` appends to the system prompt. Pipeline runs use `--setting-sources local`, so they never load this file or anything it imports. This file is for development sessions only. Change pipeline behavior in `AGENT.md`, the skills under `.claude/skills/`, or the scripts, not here.
 - Decision logic: `.claude/skills/{objective-interpretation,data-profiling,model-selection,downstream-use,reporting}/SKILL.md`. Mechanical checks: `scripts/validate_{objective,plan,recommendation}.py`.

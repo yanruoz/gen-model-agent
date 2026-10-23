@@ -19,7 +19,7 @@ REPORT_PACKAGES = ["matplotlib.backends.backend_pdf"]
 def _in_virtualenv():
     """True if this interpreter is isolated from the system/base Python (venv or virtualenv).
     Informational only (never added to `errors`): a non-isolated interpreter can still have every
-    package it needs and pass cleanly. What this guards against is CLAUDE.md's one auto-remediation
+    package it needs and pass cleanly. What this guards against is run.sh's one auto-remediation
     step (a pinned `pip install`) running against a bare system/base conda interpreter instead of
     this project's own venv/ -- exactly what happened once and mutated a person's system-wide
     environment. Seeing this fact up front, before any install decision, is the point."""

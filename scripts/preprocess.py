@@ -102,8 +102,8 @@ def stable_components(trans_train, k_max, seed):
 
     PCA fit on n samples in d ~ n dimensions overfits: later components carry more variance on the
     data they were fit to than on new data, so fitted and new data become separable in that space
-    even when they come from the same distribution (on PBMC, a classifier separated training from
-    held-out cells with AUC 0.85 in a 50-component PCA). Split the training data in half, fit PCA on
+    even when they come from the same distribution (a classifier can then separate training from
+    held-out samples well above chance). Split the training data in half, fit PCA on
     one half, and keep the largest k for which the other half retains >= 85% of the fitted half's
     cumulative variance. Cumulative (not per-component) because neighboring components with similar
     variance swap order between samples, which makes single-component ratios noisy.

@@ -55,7 +55,7 @@ def profile_dataset(X, y=None, metadata=None):
         sparsity, value_range, mean, std = None, None, None, None
     else:
         # Statistics over observed values only, so one NaN doesn't poison every number
-        # (and sparsity is the share of zeros among observed cells, not among all cells).
+        # (and sparsity is the share of zeros among observed entries, not among all entries).
         sparsity = float(np.count_nonzero(X == 0)) / n_observed
         value_range = [float(np.nanmin(X)), float(np.nanmax(X))]
         mean, std = float(np.nanmean(X)), float(np.nanstd(X))
@@ -96,7 +96,7 @@ def profile_dataset(X, y=None, metadata=None):
         profile["minority_class"] = str(classes[np.argmin(counts)])
 
     if metadata:
-        # Long lists (e.g. 32,738 gene names) would make profile.json too large to read; keep a count and examples.
+        # Long lists (e.g. tens of thousands of feature names) would make profile.json too large to read; keep a count and examples.
         profile["metadata"] = {
             k: ({"n": len(v), "first": [str(x) for x in v[:5]]} if isinstance(v, (list, tuple)) and len(v) > 20 else v)
             for k, v in metadata.items()
@@ -114,7 +114,7 @@ def _missing_text(profile):
         return "No"
     worst = profile.get("top_missing_features") or []
     text = (
-        f"Yes: {profile['missing_fraction'] * 100:.2f}% of cells ({profile['n_missing_cells']:,}); "
+        f"Yes: {profile['missing_fraction'] * 100:.2f}% of entries ({profile['n_missing_cells']:,}); "
         f"{profile['n_features_with_missing']:,} of {profile['n_features']:,} features and "
         f"{profile['n_samples_with_missing']:,} of {profile['n_samples']:,} samples affected"
     )

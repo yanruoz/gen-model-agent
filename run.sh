@@ -78,17 +78,17 @@ training budget (minutes, all models combined): $BUDGET_MIN"
 fi
 
 echo "[agent] claude -p (dataset=$DATASET${OBJECTIVE:+, objective=\"$OBJECTIVE\"})"
-# Pipeline permissions come from .claude/pipeline-settings.json. The project's dev settings
-# (.claude/settings.json) still load, because skipping the project source would also skip CLAUDE.md.
-# Deny rules beat allow rules across sources, so pipeline-settings.json denies everything the dev
-# file allows (tests/test_settings.py checks this). dontAsk: anything not allowlisted is denied,
-# never prompted, so the run can't hang. --strict-mcp-config: no MCP servers in pipeline runs.
-# AGENT.md (the pipeline instructions) is appended to the system prompt; CLAUDE.md is the dev file.
-# stream-json + bin/agent_stream.py: live progress lines, full transcript, final result JSON.
+# Isolation: --setting-sources local loads no user or project settings and no CLAUDE.md (so neither the
+# dev instructions nor anything they import reach the pipeline agent). The agent gets exactly:
+#   AGENT.md (appended system prompt), .claude/pipeline-settings.json (permissions), and the skill
+#   files it reads by path. Subagents, when built, are passed explicitly with --agents.
+# dontAsk: anything not allowlisted is denied, never prompted, so the run can't hang.
+# --strict-mcp-config: no MCP servers. stream-json + bin/agent_stream.py: progress, transcript, result.
 STATUS=0
 claude -p "$PROMPT" \
   --append-system-prompt-file AGENT.md \
   --settings .claude/pipeline-settings.json \
+  --setting-sources local \
   --permission-mode dontAsk \
   --strict-mcp-config \
   --output-format stream-json --verbose \

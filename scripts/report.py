@@ -108,7 +108,8 @@ def figure_page(png, caption):
     h, w = img.shape[:2]
     fig_w = 8.0
     fig = plt.figure(figsize=(fig_w, min(fig_w * h / w + 0.8, 10.5)))
-    ax = fig.add_axes([0.03, 0.08, 0.94, 0.9]); ax.axis("off"); ax.imshow(img)
+    ax = fig.add_axes([0.03, 0.08, 0.94, 0.9]); ax.axis("off")
+    ax.imshow(img, interpolation="none")  # embed the 300-dpi source pixels as-is, no resampling
     fig.text(0.04, 0.02, "\n".join(_wrap(caption, 120)), fontsize=8, color=MUTED, va="bottom")
     return fig
 
@@ -183,6 +184,74 @@ def _fmt(v):
     return str(v)
 
 
+def _seed_line(a):
+    models = [(m["id"], m.get("seeds", [])) for m in a["plan"].get("models", [])]
+    if not models:
+        return None
+    ex = f"{models[0][0]}_s{models[0][1][0]}" if models[0][1] else models[0][0]
+    listing = "; ".join(f"{mid} (seed{'s' if len(sd) > 1 else ''} {', '.join(map(str, sd))})" for mid, sd in models)
+    return (f"Run names are <model id>_s<seed>: {ex} is model {models[0][0]} trained with seed {models[0][1][0] if models[0][1] else '?'}. "
+            f"Models in this report: {listing}.")
+
+
+def _pca_models(a):
+    return [m for m in a["plan"].get("models", []) if m.get("input_space") == "pca"]
+
+
+def guide_pages(a):
+    meta, blocks = a["meta"], []
+    line = _seed_line(a)
+    if line:
+        multi = any(len(m.get("seeds", [])) > 1 for m in a["plan"].get("models", []))
+        why = ("A seed fixes the model's random initialization, mini-batch order, the validation slice used for early "
+               "stopping, and the random draws when sampling; the held-out split and preprocessing are the same for every run. "
+               + ("Models with two seeds are trained twice as a stability check: a conclusion that holds for both seeds does not "
+                  "depend on one lucky or unlucky initialization. Two runs are far too few to estimate run-to-run variability, "
+                  "so the spread between seeds is not a confidence interval and should not be read as one."
+                  if multi else "Each model was trained with one seed, so stability across seeds was not checked."))
+        blocks.append(("Run names and seeds", [line, why]))
+    if meta:
+        blocks.append(("Where realism is measured: the evaluation space", [
+            f"Synthetic and held-out real samples are compared in one shared space: the first {meta.get('eval_components')} "
+            f"principal components (PCs) of the transformed data, fit on the training split. These {meta.get('eval_components')} PCs "
+            f"explain {100 * meta.get('eval_variance_explained', 0):.1f}% of the variance of the transformed training data, so the "
+            f"realism metrics (C2ST, MMD, precision/recall, DCR) say nothing about the remaining "
+            f"{100 * (1 - meta.get('eval_variance_explained', 0)):.1f}%. Per-feature statistics are computed on all features instead.",
+            f"Why only {meta.get('eval_components')}: PCA fitted to the training data overfits it in later components, which would "
+            "let a classifier tell training data from new real data apart and bias every comparison. The pipeline keeps the "
+            f"components that hold up on unseen data (rule: {meta.get('eval_components_rule', '')}).",
+        ]))
+    blocks.append(("Reference values", [
+        "Every realism metric is shown with a real-vs-real reference: the same metric computed between a subsample of the "
+        "training data and the held-out real data. That is the value two genuinely real samples of this size give, so a model "
+        "is judged by how close it gets to the reference, not to a theoretical ideal."]))
+    blocks.append(("How memorization is characterized", [
+        "For each sample, DCR (distance to closest record) is the distance to its nearest training sample in the evaluation space. "
+        "The held-out real samples give the yardstick: how close a new sample from the same population typically lands to some "
+        "training sample. dcr_ratio compares the median synthetic DCR to the median held-out DCR (about 1 = as far as new real "
+        "data; well below 1 = suspiciously close). too_close_fraction counts synthetic samples closer than the 5th percentile "
+        "of held-out DCRs (about 0.05 is expected without copying).",
+        "This detects near-copies of training samples. It is not a privacy guarantee: it does not test membership inference, "
+        "attribute inference, or any formal property such as differential privacy."]))
+    if any("representation" in m for m in a["metrics"].values()):
+        blocks.append(("How the learned representation is judged", [
+            "Trustworthiness (0 to 1) asks whether samples that are neighbors in the latent space are also neighbors in the full "
+            "transformed data; it is penalized when the latent space puts unrelated samples together. It is compared with a PCA of "
+            "the same size, fit on the training data, which is the simplest alternative representation."]))
+    pcs = _pca_models(a)
+    others = [m for m in a["plan"].get("models", []) if m.get("input_space") != "pca"]
+    if pcs and others and meta:
+        for m in pcs:
+            blocks.append((f"Caution when comparing {m['id']} with the other models", [
+                f"{m['id']} is trained on the top {m['hyperparameters'].get('pca_components')} PCA components of the transformed data, "
+                f"and realism is scored in a {meta.get('eval_components')}-component PCA of the same transformed data. The directions it "
+                f"models directly are largely the directions the realism metrics look at, while "
+                f"{', '.join(o['id'] for o in others)} must reproduce them through a model of all {meta.get('n_features')} features. "
+                "The shared realism metrics may therefore favor it. Per-feature and count-level checks, which use all features, "
+                "are a fairer comparison of what each model reproduces outside those components."]))
+    return text_pages("How to read this report", blocks)
+
+
 def summary_page(a, n):
     o, p = a["objective"], a["plan"]
     blocks = [("Objective (as given)", [f"\"{o.get('raw_text', '')}\""]),
@@ -198,7 +267,8 @@ def summary_page(a, n):
                     f"  DCR ratio {_fmt(m.get('memorization', {}).get('dcr_ratio'))}")
     skipped = [e for e in a["run_log"].get("entries", []) if e.get("status") != "ok"]
     rows += [f"{e['key']:<18} {e['status']}" for e in skipped]
-    blocks.append(("Models run (headline metrics; details on the metrics page)", ["```" + "\n".join(rows or ["none"]) + "```"]))
+    guide = [_seed_line(a) + " The next page explains seeds, the evaluation space, references, and memorization."] if _seed_line(a) else []
+    blocks.append(("Models run (headline metrics; details on the metrics page)", guide + ["```" + "\n".join(rows or ["none"]) + "```"]))
     if a["recommendation"]:
         recs = [f"- [{u['verdict']}] {u['use']} ({u.get('model_key', '')})" for u in a["recommendation"]["uses"]]
         blocks.append(("Downstream-use verdicts", recs))
@@ -291,6 +361,11 @@ def metrics_pages(a):
         if g == "likelihood":
             notes.add("Likelihoods are in each model's own input space and units; do not compare them across models with different input spaces.")
         blocks.append((g.replace("_", " ").capitalize(), ["```" + "\n".join(lines) + "```"] + sorted(notes)))
+    if a["meta"]:
+        m = a["meta"]
+        blocks.insert(0, (None, [f"Realism metrics use the {m.get('eval_components')}-component evaluation space "
+                                 f"({100 * m.get('eval_variance_explained', 0):.1f}% of transformed-data variance); per-feature "
+                                 "statistics use all features. Each realism metric has a real-vs-real reference row."]))
     return text_pages("Evaluation metrics (held-out real data)", blocks)
 
 
@@ -381,6 +456,9 @@ def limitations_pages(a, untraced):
     for k, m in a["metrics"].items():
         if m.get("fidelity", {}).get("warning"):
             items.append(f"{k}: {m['fidelity']['warning']}")
+    if _pca_models(a) and len(_pca_models(a)) < len(a["plan"].get("models", [])):
+        items.append("Models trained on PCA scores are evaluated in a PCA space of the same data, which may favor them on the "
+                     "shared realism metrics (see 'How to read this report').")
     if a["meta"]:
         items.append(f"Fidelity is measured in a {a['meta'].get('eval_components')}-component PCA space "
                      f"({_fmt(a['meta'].get('eval_variance_explained'))} of training variance); differences outside it are not measured.")
@@ -421,7 +499,7 @@ def build(dataset, n, allow_untraced=False):
             print(f"  {u}")
         sys.exit("ERROR: fix findings.md so every number comes from metrics/run/profile JSON, then rerun.")
 
-    pages = (summary_page(a, n) + objective_page(a) + data_page(a) + models_page(a) + metrics_pages(a) + definitions_page(a)
+    pages = (summary_page(a, n) + guide_pages(a) + objective_page(a) + data_page(a) + models_page(a) + metrics_pages(a) + definitions_page(a)
              + figure_pages(a) + findings_pages(a) + recommendation_pages(a) + critique_pages(a)
              + limitations_pages(a, untraced) + repro_pages(a, n))
 

@@ -32,7 +32,7 @@ INK, INK_MUTED, GRID = "#1f1f1e", "#5f5e5a", "#e6e5e0"
 plt.rcParams.update({
     "font.size": 9, "axes.edgecolor": INK_MUTED, "axes.labelcolor": INK, "xtick.color": INK_MUTED,
     "ytick.color": INK_MUTED, "axes.grid": True, "grid.color": GRID, "grid.linewidth": 0.6,
-    "axes.spines.top": False, "axes.spines.right": False, "legend.frameon": False, "figure.dpi": 150,
+    "axes.spines.top": False, "axes.spines.right": False, "legend.frameon": False, "figure.dpi": 150, "savefig.dpi": 300,
 })
 
 
