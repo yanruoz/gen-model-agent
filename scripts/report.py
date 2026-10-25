@@ -496,9 +496,11 @@ def critique_pages(a):
     c = a["critique"]
     if not c:
         return []
-    blocks = [(None, [c.get("summary", "")])]
+    blocks = [(None, ["An independent critic subagent reviewed the objective, plan, metrics, and training logs (not the agent's "
+                      "own reasoning) before the recommendation and findings were written.", c.get("summary", "")])]
     for f in c.get("findings", []):
-        blocks.append((f"[{f.get('severity', '')}] {f.get('category', '')}", [f.get("issue", ""), f"Recommendation: {f.get('recommendation', '')}"]))
+        blocks.append((f"[{f.get('severity', '')}] {f.get('category', '')}", [f.get("issue", ""), f"Evidence: {f.get('evidence', '')}",
+                                                                          f"Recommendation: {f.get('recommendation', '')}"]))
     if a["plan"].get("critique_applied"):
         blocks.append(("Revision made in response", [f"Plan revision {a['plan'].get('revision')}: {a['plan']['critique_applied']}"]))
     return text_pages("Critique and revision", blocks)

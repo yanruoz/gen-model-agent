@@ -87,18 +87,20 @@ fi
 echo "[agent] claude -p (dataset=$DATASET${OBJECTIVE:+, objective=\"$OBJECTIVE\"})"
 # Isolation: --setting-sources local loads no user or project settings and no CLAUDE.md (so neither the
 # dev instructions nor anything they import reach the pipeline agent). The agent gets exactly:
-#   AGENT.md (appended system prompt), .claude/pipeline-settings.json (permissions), and the skill
-#   files it reads by path. Subagents, when built, are passed explicitly with --agents.
+#   AGENT.md (appended system prompt), .claude/pipeline-settings.json (permissions), the skill files
+#   it reads by path, and the subagents in .claude/agents/ (passed explicitly with --agents).
 # dontAsk: anything not allowlisted is denied, never prompted, so the run can't hang.
 # --strict-mcp-config: no MCP servers. stream-json + bin/agent_stream.py: progress, transcript, result.
 STATUS=0
+AGENTS_JSON=$(venv/bin/python bin/agents_json.py)   # .claude/agents/*.md -> --agents (e.g. the gen-critic subagent)
 claude -p "$PROMPT" \
   --append-system-prompt-file AGENT.md \
+  --agents "$AGENTS_JSON" \
   --settings .claude/pipeline-settings.json \
   --setting-sources local \
   --permission-mode dontAsk \
   --strict-mcp-config \
-  --output-format stream-json --verbose \
+  --output-format stream-json --verbose < /dev/null \
   | venv/bin/python bin/agent_stream.py "$OUT" || STATUS=$?
 
 # ── Step 5: success check ──
