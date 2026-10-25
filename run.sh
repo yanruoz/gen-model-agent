@@ -9,6 +9,13 @@
 # instructions -> fail (nonzero exit) if the expected report PDF was not produced.
 set -euo pipefail
 
+# A full run takes up to ~40 min; on macOS, keep the machine from idle-sleeping until it ends
+# (a sleep mid-run kills the headless session). Re-executes this script once under caffeinate.
+if [[ -z "${GENAGENT_CAFFEINATED:-}" ]] && command -v caffeinate >/dev/null; then
+  export GENAGENT_CAFFEINATED=1
+  exec caffeinate -is "$0" "$@"  # -i: no idle sleep; -s: no system sleep on AC power (lid must stay open)
+fi
+
 usage() {
   echo "usage: ./run.sh <dataset> \"<objective>\" [--report-number N] [--budget-min M] [--use-api-key]" >&2
   echo "       ./run.sh <dataset> --smoke" >&2
