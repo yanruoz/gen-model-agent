@@ -14,7 +14,7 @@ from pathlib import Path
 from plan_schema import (
     IMAGE_HYPERPARAMS, IMPLEMENTED, INPUT_SPACES, KNOWN_PREPROCESSING_STEPS, LIKELIHOODS, MIN_SEEDS, MIN_TRAIN_SAMPLES,
     MODEL_FAMILIES, MODEL_STATUSES, NONNEG_ONLY_STEPS, OBJECTIVE_TASKS, REQUIRED_HYPERPARAMS,
-    STEP_KIND_ORDER, TEST_FRACTION_RANGE, is_lazy_reason, serves,
+    STEP_KIND_ORDER, TASK_FAMILIES, TEST_FRACTION_RANGE, is_lazy_reason, serves,
 )
 
 
@@ -83,6 +83,10 @@ def _check_model(m, plan, profile, objective, n_train, errors, warnings):
             errors.append(f"model {mid}: serves_tasks entry {t!r} is not one of this run's tasks {sorted(plan_tasks)}")
         elif not serves(family, t):
             errors.append(f"model {mid}: a {family} lacks the capability task '{t}' needs (see plan_schema.TASK_NEEDS)")
+        elif t in TASK_FAMILIES and family not in TASK_FAMILIES[t]:
+            errors.append(f"model {mid}: the '{t}' test can only score {sorted(TASK_FAMILIES[t])} models")
+        if t == "anomaly_detection" and m.get("conditional"):
+            errors.append(f"model {mid}: anomaly scores must not depend on a class label; use an unconditional model")
 
     conditional = bool(m.get("conditional", False))
     if conditional and not profile.get("has_labels"):

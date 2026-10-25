@@ -46,6 +46,21 @@ Pick exactly one primary `task` from `plan_schema.OBJECTIVE_TASKS`. Add `seconda
 
 If the objective is vague ("do something useful with this data"), pick the task that the data supports best and that the evaluation can actually measure, and list the other plausible readings in `ambiguities`. Never stop to ask: record the judgment call (AGENT.md rule 8 on assumptions).
 
+## Which tasks can be tested here
+
+Every task needs an objective test on held-out real data, or nobody can judge the result. Implemented tests (`plan_schema.TASK_SUPPORT`):
+
+| Task | Tabular | Images | Test |
+|---|---|---|---|
+| data_generation | yes | yes | two-sample realism metrics; labeled images also get train-on-synthetic, test-on-real |
+| representation_learning | yes | no | latent space vs a same-size PCA |
+| class_balancing, augmentation | no | yes (labeled) | headroom check, then classifier on held-out real data |
+| anomaly_detection | yes | yes | corrupted held-out samples, AUROC vs non-generative baselines |
+| imputation | yes | yes | masked held-out values vs mean and kNN imputation |
+| uncertainty_quantification | no | no | none |
+
+If the requested task has no test for this data, the validator requires `decline` or `proceed_adapted` to a testable task. Say so plainly in `decision_reason`.
+
 ## Step 2: decide whether to model at all
 
 Check each against `profile.json`, in order. The validator enforces the first three.
@@ -61,7 +76,10 @@ Check each against `profile.json`, in order. The validator enforces the first th
 One sentence naming the measurement on **held-out real data** that decides success. Examples:
 - representation_learning: "held-out reconstruction likelihood is close to the training value, and the latent space preserves nearest-neighbor structure (trustworthiness) of the log-normalized data".
 - data_generation: "a classifier cannot tell synthetic from held-out real samples well (C2ST AUC close to its real-vs-real reference), and synthetic samples are no closer to training samples than held-out real samples are".
-- class_balancing: "minority-class F1 on held-out real data improves over real data plus simple resampling".
+- class_balancing: "minority-class F1 on held-out real data improves over real data plus simple resampling by more than the seed noise".
+- data_generation meant to replace real training data: "a classifier trained only on synthetic data reaches accuracy close to one trained on the same number of real samples (utility ratio near 1), with realism metrics near their real-vs-real references".
+- anomaly_detection: "the model's anomaly score separates corrupted from uncorrupted held-out samples (AUROC) better than the non-generative baselines".
+- imputation: "error on masked held-out values is lower than mean and kNN imputation".
 
 ## Target class
 

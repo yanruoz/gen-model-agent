@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 from plan_schema import (
-    DECISIONS, MIN_SAMPLES_ANY_MODEL, NEAR_BALANCED_RATIO, OBJECTIVE_TASKS,
+    DECISIONS, MIN_SAMPLES_ANY_MODEL, NEAR_BALANCED_RATIO, OBJECTIVE_TASKS, TASK_SUPPORT,
     TASKS_REQUIRING_LABELS, is_lazy_reason,
 )
 
@@ -80,6 +80,16 @@ def validate_objective(obj, profile, objective_text=None):
     for t in obj["secondary_tasks"]:
         if t in TASKS_REQUIRING_LABELS and not has_labels:
             errors.append(f"secondary task '{t}' needs class labels but this dataset has none; drop it and note it in ambiguities")
+
+    # No objective test exists for some task/modality pairs: training models nobody can judge is not allowed.
+    modality = profile.get("modality", "tabular")
+    if decision != "decline" and effective in OBJECTIVE_TASKS and modality not in TASK_SUPPORT[effective]:
+        errors.append(f"no objective test is implemented for '{effective}' on {modality} data; decision must be 'decline', "
+                      f"or 'proceed_adapted' to a task that can be tested here: "
+                      f"{sorted(t for t, m in TASK_SUPPORT.items() if modality in m)}")
+    for t in obj["secondary_tasks"]:
+        if t in OBJECTIVE_TASKS and modality not in TASK_SUPPORT[t]:
+            errors.append(f"secondary task '{t}' has no objective test on {modality} data; drop it and note it in ambiguities")
 
     if task == "class_balancing" and has_labels:
         ratio = profile.get("imbalance_ratio")

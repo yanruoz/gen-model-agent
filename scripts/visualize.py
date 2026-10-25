@@ -12,7 +12,7 @@
      sample_grid.png            per class (rows): real held-out images, then each model's samples
      loss_curves.png            as above; GANs show discriminator and generator losses
      label_agreement.png        per class: how often the real-data classifier assigns the requested class
-     downstream.png             class-balancing test: target-class F1 per training set (if run)
+     objective_tests.png        objective tests (balancing / train-on-synthetic / anomaly / imputation), if run
    Colors: held-out real data is always neutral gray; models take fixed categorical slots in plan
    order (never cycled), so a model keeps its color across every figure.
 """
@@ -104,30 +104,51 @@ def label_agreement(dataset, keys, colors, fig_dir):
     plt.close(fig)
 
 
-def downstream(dataset, colors, fig_dir):
-    f = outputs(dataset) / "metrics" / "downstream.json"
-    if not f.exists():
+def _arm_color(name, colors):
+    for k, c in colors.items():
+        if name.endswith(k):
+            return c
+    return REAL
+
+
+def objective_tests(dataset, colors, fig_dir):
+    """One panel per objective test that ran: balancing / train-on-synthetic (mean +/- sd over seeds),
+    anomaly AUROC per score, imputation RMSE per imputer."""
+    m = outputs(dataset) / "metrics"
+    load = lambda n: json.loads((m / n).read_text()) if (m / n).exists() else None
+    d, an, im = load("downstream.json") or {}, load("anomaly.json"), load("imputation.json")
+    panels = []
+    if d.get("balancing"):
+        b = d["balancing"]
+        panels.append((f"Class balancing: target-class F1 (class {', '.join(b['targets'])})",
+                       [(n, r["target_f1_mean"], r["target_f1_sd"]) for n, r in b["arms"].items()], "F1 on held-out real images"))
+    if d.get("tstr"):
+        panels.append(("Train on synthetic, test on real: accuracy",
+                       [(n, r["accuracy_mean"], r["accuracy_sd"]) for n, r in d["tstr"]["arms"].items()], "accuracy on held-out real images"))
+    if an:
+        panels.append(("Anomaly detection: mean AUROC over corruption types",
+                       [(n, r["auroc_mean"], 0) for n, r in an["results"].items() if "auroc_mean" in r], "AUROC (0.5 = chance)"))
+    if im:
+        panels.append((f"Imputation: RMSE on masked entries ({im['error_scale']})",
+                       [(n, r["rmse"], 0) for n, r in im["results"].items() if "rmse" in r], "RMSE (lower is better)"))
+    if not panels:
         return
-    d = json.loads(f.read_text())
-    res = {k: v for k, v in d["results"].items() if "target_f1" in v}
-    names = list(res)
-    fig, ax = plt.subplots(figsize=(7.6, 0.45 * len(names) + 1.4))
-    for i, n in enumerate(names):
-        key = n.replace("real_plus_", "")
-        c = colors.get(key, REAL)
-        ax.barh(i, res[n]["target_f1"], color=c, height=0.6)
-        ax.text(res[n]["target_f1"] + 0.003, i, f"{res[n]['target_f1']:.4f}", va="center", fontsize=7, color=INK)
-    base = np.mean([res[n]["target_f1"] for n in names if n.startswith("real_seed")])
-    noise = d.get("noise_level_target_f1", 0)
-    ax.axvspan(base - noise, base + noise, color=REAL, alpha=0.18, lw=0, label="real-only seed spread")
-    ax.set_yticks(range(len(names)), names, fontsize=7); ax.invert_yaxis()
-    lo = min(res[n]["target_f1"] for n in names)
-    ax.set_xlim(max(0, lo - 0.1), 1.0)
-    ax.set_xlabel(f"F1 for target class {', '.join(d['targets'])} on held-out real images")
-    ax.legend(fontsize=7, loc="lower right")
-    ax.set_title("Class-balancing test: classifier trained on each training set", fontsize=9, color=INK, loc="left")
+    fig, axes = plt.subplots(len(panels), 1, figsize=(7.6, sum(0.42 * len(p[1]) + 1.3 for p in panels)), squeeze=False)
+    for ax, (title, rows, xlabel) in zip(axes[:, 0], panels):
+        names = [r[0] for r in rows]
+        vals = np.array([r[1] for r in rows]); sds = np.array([r[2] for r in rows])
+        ax.barh(range(len(rows)), vals, xerr=np.where(sds > 0, sds, np.nan), color=[_arm_color(n, colors) for n in names],
+                height=0.6, error_kw={"ecolor": INK_MUTED, "elinewidth": 1, "capsize": 3})
+        for i, v in enumerate(vals):
+            ax.text(v, i, f"  {v:.4f}", va="center", fontsize=7, color=INK)
+        ax.set_yticks(range(len(rows)), names, fontsize=7); ax.invert_yaxis()
+        lo, hi = float(np.min(vals - sds)), float(np.max(vals + sds))
+        pad = 0.15 * (hi - lo + 1e-3)
+        ax.set_xlim(max(0, lo - 3 * pad), hi + 3 * pad)
+        ax.set_xlabel(xlabel, fontsize=8)
+        ax.set_title(title, fontsize=9, color=INK, loc="left")
     fig.tight_layout()
-    fig.savefig(fig_dir / "downstream.png")
+    fig.savefig(fig_dir / "objective_tests.png")
     plt.close(fig)
 
 
@@ -277,12 +298,13 @@ def visualize(dataset, keys):
     if prepared["meta"].get("image_shape"):
         sample_grid(dataset, keys, prepared, fig_dir)
         label_agreement(dataset, keys, colors, fig_dir)
-        downstream(dataset, colors, fig_dir)
+        objective_tests(dataset, colors, fig_dir)
         real_vs_synthetic(dataset, keys, colors, prepared, fig_dir)
         latent_plots(dataset, keys, prepared, fig_dir)
         print(f"[visualize] figures -> {fig_dir}")
         return
     real_vs_synthetic(dataset, keys, colors, prepared, fig_dir)
+    objective_tests(dataset, colors, fig_dir)
     feature_stats(dataset, keys, colors, prepared, fig_dir)
     count_properties(dataset, keys, colors, prepared, fig_dir)
     latent_plots(dataset, keys, prepared, fig_dir)

@@ -10,8 +10,8 @@
    - Each step runs as its own subprocess; a failing step is retried once, then that model/seed is
      skipped and recorded. One model failing never stops the others.
    - Models with status "not_run_budget" are recorded, not run.
-   - For class_balancing / augmentation objectives on labeled data, runs downstream_test.py after the
-     models (real vs real+resampled vs real+synthetic classifier, scored on held-out real data).
+   - After the models, runs the objective test for each of the objective's tasks (plan_schema.TASK_TESTS):
+     downstream_test.py (class balancing / train-on-synthetic, labeled images), anomaly_test.py, imputation_test.py.
    - Writes outputs/<d>/run_log.json with per-model/seed status, minutes, and errors.
 """
 import argparse
@@ -22,7 +22,7 @@ import time
 from pathlib import Path
 
 from model_io import config_hash, outputs
-from plan_schema import artifact_key
+from plan_schema import TASK_TESTS, artifact_key
 from preprocess import prep_hash, prepare
 
 PY = sys.executable
@@ -103,13 +103,19 @@ def run_plan(plan_path):
         entry["minutes"] = round((time.time() - t0) / 60, 2)
         log["entries"].append(entry)
 
+    # ── Objective tests (plan_schema.TASK_TESTS), each run once over all finished models ──
     objective = json.loads(plan_path.with_name("objective.json").read_text())
-    if done_keys and objective.get("effective_task") in ("class_balancing", "augmentation"):
-        bal = [k for k in done_keys if (outputs(dataset) / "samples" / f"{k}_balance_trans.npy").exists()]
-        print(f"[run_plan] downstream class-balancing test ({len(bal)} models with balancing samples)")
-        t0 = time.time()
-        ok, err = _run(["downstream_test.py", "--dataset", dataset, "--keys", ",".join(bal)], "downstream test")
-        log["downstream"] = {"status": "ok" if ok else f"failed: {err}", "keys": bal, "minutes": round((time.time() - t0) / 60, 2)}
+    tasks = {objective.get("effective_task"), *objective.get("secondary_tasks", [])} - {None}
+    meta = json.loads((outputs(dataset) / "prepared" / "meta.json").read_text())
+    log["objective_tests"] = {}
+    if done_keys:
+        for script in sorted({TASK_TESTS[t] for t in tasks if t in TASK_TESTS}):
+            if script == "downstream_test.py" and not (meta.get("has_labels") and meta.get("image_shape")):
+                continue  # classifier-based tests need labeled images
+            print(f"[run_plan] objective test: {script}")
+            t0 = time.time()
+            ok, err = _run([script, "--dataset", dataset, "--keys", ",".join(done_keys)], script)
+            log["objective_tests"][script] = {"status": "ok" if ok else f"failed: {err}", "minutes": round((time.time() - t0) / 60, 2)}
 
     if done_keys:
         print("[run_plan] figures")

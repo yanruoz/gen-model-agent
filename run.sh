@@ -24,7 +24,7 @@ usage() {
 
 [[ $# -ge 2 ]] || usage
 DATASET="$1"; shift
-SMOKE=0; OBJECTIVE=""; REPORT_NUMBER=""; BUDGET_MIN=20; USE_API_KEY=0
+SMOKE=0; OBJECTIVE=""; REPORT_NUMBER=""; BUDGET_MIN=30; USE_API_KEY=0
 if [[ "$1" == "--smoke" ]]; then SMOKE=1; shift; else OBJECTIVE="$1"; shift; fi
 while [[ $# -gt 0 ]]; do
   case "$1" in

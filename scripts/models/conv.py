@@ -83,10 +83,11 @@ class ConvVAE(nn.Module):
         return torch.stack(lls).mean(0) - kl
 
     @torch.no_grad()
-    def sample(self, n, c=None):
-        """Returns the decoder MEAN image for each prior draw (pixel noise from the likelihood would only add
-        independent per-pixel speckle), flattened HWC in [0, 1]."""
-        z = torch.randn(n, self.latent_dim, device=self.mu_head.weight.device)
+    def sample(self, n, c=None, z=None):
+        """Returns the decoder MEAN image for each latent draw (pixel noise from the likelihood would only add
+        independent per-pixel speckle), flattened HWC in [0, 1]. z defaults to prior draws; generate.py passes
+        draws from a density fit to the training latents instead."""
+        z = z if z is not None else torch.randn(n, self.latent_dim, device=self.mu_head.weight.device)
         return torch.sigmoid(self.decode_logits(z, c))
 
 
@@ -143,9 +144,15 @@ class CondGAN(nn.Module):
 
     @torch.no_grad()
     def sample(self, n, y=None):
+        """Generator BatchNorm uses batch statistics here, as during training: with the stored running
+        statistics (eval mode) samples were measurably worse (higher Frechet distance, weaker class conditioning)."""
         dev = next(self.G.parameters()).device
         y = y if y is not None else torch.zeros(n, dtype=torch.long, device=dev)
-        return self.G(torch.randn(n, self.latent_dim, device=dev), y)
+        was_training = self.G.training
+        self.G.train()
+        out = self.G(torch.randn(n, self.latent_dim, device=dev), y)
+        self.G.train(was_training)
+        return out
 
 
 # ── Conditional diffusion ──

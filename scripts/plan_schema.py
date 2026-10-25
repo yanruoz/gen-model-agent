@@ -44,7 +44,7 @@ TASK_NEEDS = {
     "augmentation":               [{"sampling"}],
     "class_balancing":            [{"sampling", "conditional"}],
     "imputation":                 [{"reconstruction"}],
-    "anomaly_detection":          [{"exact_likelihood"}, {"likelihood_bound"}],
+    "anomaly_detection":          [{"exact_likelihood"}, {"likelihood_bound"}, {"reconstruction"}],
     "representation_learning":    [{"latent"}],
     "uncertainty_quantification": [{"exact_likelihood"}, {"likelihood_bound"}],
 }
@@ -122,5 +122,26 @@ def artifact_key(model_id, seed):
     return f"{model_id}_s{seed}"
 
 
+# Tasks with an implemented objective test, by modality. A task outside this table cannot be evaluated,
+# so validate_objective.py requires declining or adapting it rather than training models nobody can judge.
+TASK_SUPPORT = {
+    "data_generation":            {"tabular", "image"},   # two-sample metrics; + train-on-synthetic test for labeled images
+    "representation_learning":    {"tabular"},            # latent vs same-size PCA
+    "class_balancing":            {"image"},              # headroom check + downstream classifier test
+    "augmentation":               {"image"},
+    "anomaly_detection":          {"tabular", "image"},   # corrupted held-out samples, AUROC vs baselines
+    "imputation":                 {"tabular", "image"},   # masked held-out values vs mean / kNN imputers
+    "uncertainty_quantification": set(),                  # no test implemented
+}
+# Families each task's test can actually score (beyond the capability check).
+TASK_FAMILIES = {
+    "anomaly_detection": {"vae", "flow", "diffusion"},
+    "imputation": {"vae"},
+}
+# Objective test script per task (run by run_plan.py after the models).
+TASK_TESTS = {"class_balancing": "downstream_test.py", "augmentation": "downstream_test.py",
+              "data_generation": "downstream_test.py", "anomaly_detection": "anomaly_test.py", "imputation": "imputation_test.py"}
+
 assert set(TASK_NEEDS) == OBJECTIVE_TASKS
+assert set(TASK_SUPPORT) == OBJECTIVE_TASKS
 assert set(MODEL_CAPABILITIES) == MODEL_FAMILIES

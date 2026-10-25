@@ -37,6 +37,7 @@ from preprocess import load_prepared, to_eval_space
 KNN_K = 5          # neighbors for precision/recall (Kynkaanniemi et al., 2019)
 TRUST_K = 15       # neighbors for trustworthiness / kNN overlap
 C2ST_FOLDS = 5
+REF_SEED = 0  # one real-vs-real reference subsample shared by all models
 C2ST_REFERENCE_WARN = 0.65  # real-vs-real AUC above this flags a biased evaluation space
 
 IMAGE_DEFINITIONS = {
@@ -81,9 +82,13 @@ def _mmd2(x, y, gamma):
 
 
 def _c2st(a, b, seed):
+    """Shuffled stratified folds: with unshuffled folds, a sample set stored in a structured order
+    (e.g. grouped by mixture component) leaves whole groups out of training and understates the AUC."""
+    from sklearn.model_selection import StratifiedKFold
     X = np.vstack([a, b]); y = np.r_[np.zeros(len(a)), np.ones(len(b))]
     clf = HistGradientBoostingClassifier(max_iter=200, random_state=seed)
-    return float(cross_val_score(clf, X, y, cv=C2ST_FOLDS, scoring="roc_auc").mean())
+    cv = StratifiedKFold(C2ST_FOLDS, shuffle=True, random_state=seed)
+    return float(cross_val_score(clf, X, y, cv=cv, scoring="roc_auc").mean())
 
 
 def _knn_radii(x, k):
@@ -116,7 +121,7 @@ def _fidelity(f_syn, f_te, f_tr, seed, rng, with_fd=False):
     """Two-sample metrics between synthetic and held-out real features, with real-vs-real references."""
     n = min(len(f_syn), len(f_te))
     f_syn, f_te_n = f_syn[:n], f_te[:n]
-    f_tr_sub = f_tr[rng.choice(len(f_tr), size=n, replace=False)]
+    f_tr_sub = f_tr[np.random.default_rng(REF_SEED).choice(len(f_tr), size=n, replace=False)]  # same reference for every model
     d_te = torch.cdist(torch.from_numpy(f_te_n), torch.from_numpy(f_te_n))
     gamma = 1.0 / (2 * float(d_te[d_te > 0].median()) ** 2)
     out = {"n_compared": n}
@@ -219,7 +224,7 @@ def evaluate(dataset, key):
     ev_te, ev_tr = prepared["eval_test"].astype(np.float64), prepared["eval_train"].astype(np.float64)
     n = min(len(ev_syn), len(ev_te))
     ev_syn, ev_te_n = ev_syn[:n], ev_te[:n]
-    ev_tr_sub = ev_tr[rng.choice(len(ev_tr), size=n, replace=False)]             # real-vs-real reference
+    ev_tr_sub = ev_tr[np.random.default_rng(REF_SEED).choice(len(ev_tr), size=n, replace=False)]  # same reference for every model
 
     d_te = torch.cdist(torch.from_numpy(ev_te_n), torch.from_numpy(ev_te_n))
     gamma = 1.0 / (2 * float(d_te[d_te > 0].median()) ** 2)

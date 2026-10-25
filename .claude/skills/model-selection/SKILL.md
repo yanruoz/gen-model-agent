@@ -42,7 +42,7 @@ description: Choose generative model(s) and hyperparameters for the validated ob
 
 - `id`: short, unique, `[a-z0-9_]`. Artifacts are keyed `<id>_s<seed>`, so seeds never overwrite each other.
 - `serves_tasks`: the tasks from `objective.json` (`effective_task` and `secondary_tasks`) this model is for. The validator checks the family has the needed capability (`plan_schema.TASK_NEEDS` / `MODEL_CAPABILITIES`).
-- `estimated_minutes`: per seed, from the timing table below. Planned minutes x seeds, summed over models, must fit `budget_min` (from the run prompt; default 20).
+- `estimated_minutes`: per seed, from the timing table below. Planned minutes x seeds, summed over models, must fit `budget_min` (from the run prompt; default 30).
 - `status`: `planned`, or `not_run_budget` for a model you would run but that doesn't fit the budget. Keep its estimate and reason, so the report says what was left out and why. This never blocks the run.
 - Validate: `venv/bin/python scripts/validate_plan.py outputs/<dataset>/plan.json`.
 
@@ -57,16 +57,22 @@ Capabilities are fixed (`plan_schema.MODEL_CAPABILITIES`):
 | Sample quality on images | blurry | sharper, unstable | weak on raw pixels | best, slowest |
 | Stability | high | **low (needs >= 2 seeds)** | high | high |
 
-Rules (the first match sets the primary model; add one comparator where the budget allows):
+**This is not a benchmark.** Choose **one primary model**, the family best suited to this objective on this data, and train it. Add **at most one comparator**, and only when there is a specific, stated reason the comparison answers a question the objective raises (for example "does an exact-likelihood model detect these anomalies better than the count-aware VAE?"). "To compare families" is not a reason. Every planned model must have an objective test that can score it (`plan_schema.TASK_SUPPORT` / `TASK_FAMILIES`; the validator enforces this). Unless the objective was declined, at least one generative model is always trained, so the run has a model, an evaluation, and a recommendation.
 
-- **representation_learning** → VAE. On count data (`is_nonneg_integer`, tabular, sparse), use `likelihood: nb` on `input_space: raw`. Raw counts with a library-size-aware negative binomial decoder avoid the distortion that log-transforming sparse counts adds. On continuous data use `gaussian` on `transformed`.
-- **data_generation, tabular** → the VAE above as primary, plus a **flow on `pca`** as a comparator: an exact-likelihood model with a different inductive bias, scored in the same evaluation space. A GAN is allowed only with a dataset-specific reason; on a few thousand rows it is the least stable choice.
-- **anomaly_detection / uncertainty_quantification** → flow (exact likelihood), on `pca` for high-dimensional data, with the VAE's ELBO as a cross-check. A GAN is invalid here (no likelihood).
-- **imputation** → VAE (reconstruction). Diffusion inpainting for images only if the budget allows.
-- **class_balancing / augmentation on images** → three conditional models compared (`conditional: true`, all on `input_space: transformed` after `scale_unit_range`): conditional VAE (fast baseline, expect blurry samples), conditional GAN with 2 seeds, conditional diffusion. If diffusion doesn't fit the budget, keep it with `status: not_run_budget`. `run_plan.py` then runs the downstream test automatically: the same classifier is trained on real data, real data with resampling, and real data plus each model's target-class samples, and all are scored on held-out real data. That test is what the recommendation rests on.
-- **data_generation on images** → unconditional or conditional diffusion if the budget allows, otherwise GAN (2 seeds); a VAE only as a fast baseline.
+Primary model by objective (first match):
 
-Don't add models just to fill the table: each one needs a reason tied to the objective, and it needs a comparison the evaluation can actually make.
+- **representation_learning** → VAE. On count data (`is_nonneg_integer`, tabular, sparse), use `likelihood: nb` on `input_space: raw`: a library-size-aware negative binomial decoder on raw counts avoids the distortion that log-transforming sparse counts adds. On continuous data, `gaussian` on `transformed`. Its test compares the latent space with a same-size PCA.
+- **data_generation, tabular** → the same VAE (it generates by sampling a density fit to its training latent codes). A flow on `pca` is a reasonable comparator when the objective needs an exact likelihood or when the data are continuous; say which. A GAN only with a dataset-specific reason; on a few thousand rows it is the least stable choice.
+- **data_generation, images** → conditional diffusion when labels exist (`conditional: true`), else unconditional diffusion; it gives the most realistic samples and conditions on class reliably. If the plan needs a cheaper or faster-sampling alternative, a GAN (2 seeds) is the comparator, and the reason must say why speed matters here. On labeled images, `run_plan.py` also runs train-on-synthetic, test-on-real automatically.
+- **anomaly_detection** (unconditional models only) → a likelihood model that sees what makes these anomalies anomalous. Count data: the NB VAE (its ELBO uses library size, which normalization removes). Continuous tabular: a flow on `pca` (exact likelihood). Images: an unconditional VAE, or diffusion (denoising error) if the budget allows. The test also scores two non-generative baselines, so the model must beat them to be useful.
+- **imputation** → VAE (the only family whose imputation the test implements).
+- **class_balancing / augmentation on images** → first read `metrics/headroom.json` (AGENT.md step 4 runs `headroom_check.py` before models are chosen):
+  - **No headroom** (its `summary.reading` says new real target-class data does not beat resampling): train **one** generator, conditional diffusion (the family most likely to produce the requested class), to confirm, with no comparator. The plan's reasons and the later recommendation should expect resampling to be enough.
+  - **Headroom exists**: conditional diffusion as primary; one comparator (conditional GAN with 2 seeds, or conditional VAE as a fast baseline) only with a stated reason.
+  Models are `conditional: true` on `input_space: transformed` after `scale_unit_range`.
+- **uncertainty_quantification** → no test exists; the objective validator requires declining or adapting it.
+
+If a model you would choose doesn't fit the budget, keep it in the plan with `status: not_run_budget` and its estimate; the run continues without it.
 
 ## Step 2: hyperparameters (worked heuristics; every value needs a reason citing this data)
 
@@ -89,7 +95,7 @@ Don't add models just to fill the table: each one needs a reason tied to the obj
 - Conditional VAE: `latent_dim` 32, `base_channels` 32, `hidden_dims` [256], `likelihood` "bernoulli" (pixels in [0, 1]), `kl_warmup_epochs` about 10% of epochs, `epochs` 60 (maximum; early stopping applies), `batch_size` 128, `lr` 1e-3. Expect blurry means; that is the known VAE trade-off, and the reason to compare it with sharper families.
 - Conditional GAN: `latent_dim` 64, `base_channels` 64, `epochs` 20–30 (a fixed count: GANs are not early-stopped because their losses don't measure sample quality), `batch_size` 128, `lr` 2e-4, `seeds` [0, 1].
 - Conditional diffusion: `timesteps` 400, `base_channels` 32, `sampling_steps` 50 (DDIM), `batch_size` 128, `lr` 2e-4. Diffusion keeps improving with training much longer than the other families, so give it the largest share of the budget that fits (`epochs` as the budget allows; early stopping applies). `guidance_scale` trades diversity for class fidelity; 2–4 is the usual range, and the upper end suits class balancing, where producing the requested class matters most.
-- Subsampling: with a 20–30 min budget and these three families, about 20,000 images (stratified) keeps every model's training to minutes. State the time arithmetic in the reason.
+- Subsampling: with a 30 min budget, about 20,000 images (stratified) keeps one or two image models' training to minutes and leaves diffusion room for 60+ epochs. State the time arithmetic in the reason.
 
 **Seeds**: one seed is enough for a stable family (VAE, flow) under a tight budget; give it 2 if the budget allows and the claim depends on stability. GANs: always >= 2.
 

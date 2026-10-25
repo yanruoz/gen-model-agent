@@ -103,6 +103,28 @@ class TestObjective(unittest.TestCase):
         self.bad(objective(decision="decline"), "effective_task = null")
 
 
+class TestTaskSupport(unittest.TestCase):
+    def test_untestable_task_cannot_proceed(self):
+        o = objective(task="uncertainty_quantification", effective_task="uncertainty_quantification")
+        errs, _ = validate_objective(o, PBMC_PROFILE)
+        self.assertTrue(any("no objective test" in e for e in errs), errs)
+        o = objective(task="uncertainty_quantification", decision="proceed_adapted", effective_task="anomaly_detection")
+        self.assertEqual(validate_objective(o, PBMC_PROFILE)[0], [])
+
+    def test_class_balancing_on_tabular_has_no_test(self):
+        prof = dict(PBMC_PROFILE, has_labels=True, imbalance_ratio=3.0, class_counts={"a": 1, "b": 1})
+        errs, _ = validate_objective(objective(task="class_balancing", effective_task="class_balancing"), prof)
+        self.assertTrue(any("no objective test" in e for e in errs), errs)
+
+    def test_imputation_only_by_vae_and_anomaly_unconditional(self):
+        o = objective(task="imputation", effective_task="imputation")
+        flow = vae(id="flow", family="flow", serves_tasks=["imputation"], input_space="pca",
+                   hyperparameters={"n_layers": 6, "hidden_dim": 64, "epochs": 100, "batch_size": 128, "lr": 1e-3, "pca_components": 10})
+        flow["hyperparameter_reasons"] = {k: R for k in flow["hyperparameters"]}
+        errs = validate_plan(plan([vae(serves_tasks=["imputation"]), flow]), o, PBMC_PROFILE)[0]
+        self.assertTrue(any("can only score" in e or "lacks the capability" in e for e in errs), errs)
+
+
 class TestPlan(unittest.TestCase):
     def errors(self, p, o=None, profile=PBMC_PROFILE):
         return validate_plan(p, o or objective(), profile)[0]

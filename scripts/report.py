@@ -135,6 +135,8 @@ def load_all(dataset):
     a["metrics"] = {k: _load(out / "metrics" / f"{k}.json") for k in ok if (out / "metrics" / f"{k}.json").exists()}
     a["runs"] = {k: _load(out / "runs" / f"{k}.json") for k in ok if (out / "runs" / f"{k}.json").exists()}
     a["downstream"] = _load(out / "metrics" / "downstream.json")
+    a["anomaly"] = _load(out / "metrics" / "anomaly.json")
+    a["imputation"] = _load(out / "metrics" / "imputation.json")
     a["evaluator"] = _load(out / "evaluator" / "evaluator.json")
     a["is_image"] = bool(a["meta"].get("image_shape"))
     return a
@@ -160,7 +162,8 @@ def untraced_numbers(text, a):
     precision written. Percentages may also match a fraction (81.2% <-> 0.812)."""
     pool = []
     for src in (a["profile"], a["meta"], a["run_log"], list(a["metrics"].values()), list(a["runs"].values()),
-                a["plan"], a["recommendation"] or {}, a["downstream"] or {}, a["evaluator"] or {}):
+                a["plan"], a["recommendation"] or {}, a["downstream"] or {}, a["evaluator"] or {},
+                a["anomaly"] or {}, a["imputation"] or {}):
         _numbers_in(src, pool)
     missing = []
     for m in re.finditer(r"(?<![\w.])(-?\d+\.\d+)(%?)", text):
@@ -251,13 +254,33 @@ def guide_pages(a):
             "label_agreement is the share of synthetic images that the evaluation classifier assigns to the class they were generated "
             "for. Its reference is the classifier's accuracy on held-out real images, which is what a perfect class-conditional generator "
             "would reach. Low agreement means the model's class conditioning is weak, which matters directly for class balancing."]))
-    if a["downstream"]:
+    d = a["downstream"] or {}
+    if d.get("balancing"):
         blocks.append(("The class-balancing test", [
-            "The same classifier is trained on several training sets and scored on held-out real images: real data only (twice, with "
-            "two seeds), real data with the target class oversampled by duplication, and real data with the target class topped up "
-            "with each model's synthetic images. Synthetic images never enter the held-out set. The difference between the two "
-            "real-only runs is the noise level; an improvement smaller than that cannot be told apart from training noise. "
-            "Two runs give a rough yardstick, not a confidence interval."]))
+            "Before any generator was chosen, a headroom check trained the same classifier, with three seeds each, on real data "
+            "only, on real data with the target class oversampled by duplication, and, when unused real data existed, on real data "
+            "plus that many genuinely new real target-class samples. The last one is the best case for any generator: a perfect "
+            "generator can at most produce new samples from the same distribution. Each model's synthetic target-class samples "
+            "were then tested the same way. Everything is scored on held-out real images, which synthetic data never enters. "
+            "Differences smaller than about twice the real-only seed standard deviation are not meaningful."]))
+    if d.get("tstr"):
+        blocks.append(("Could synthetic data replace the real data? (train on synthetic, test on real)", [
+            "The same classifier is trained on each model's labeled synthetic images only, and on the same number of real training "
+            "images, three seeds each, and both are scored on held-out real images. utility_ratio is synthetic accuracy divided by real "
+            "accuracy: 1 means the synthetic data is as useful for training this classifier as real data."]))
+    if a["anomaly"]:
+        blocks.append(("The anomaly-detection test", [
+            "No labeled anomalies exist, so anomalies are made from held-out real samples with corruptions of known meaning "
+            f"({', '.join(a['anomaly']['corruptions'])}). Each model scores every sample (negative ELBO for VAEs, negative "
+            "log-likelihood for flows, denoising error for diffusion models) and AUROC measures how well the score separates corrupted "
+            "from uncorrupted samples (0.5 = chance). Two non-generative baselines are scored the same way, so a model is only useful "
+            "here if it beats them."]))
+    if a["imputation"]:
+        blocks.append(("The imputation test", [
+            f"Real values of held-out samples are hidden on purpose ({a['imputation']['mask_kind']} masking, "
+            f"{a['imputation']['n_masked_entries']} entries), so the truth is known. Each imputer fills them in, and the error on the "
+            f"hidden entries is measured on the {a['imputation']['error_scale']} scale. The VAE is compared with mean and "
+            "k-nearest-neighbor imputation."]))
     if any("representation" in m for m in a["metrics"].values()):
         blocks.append(("How the learned representation is judged", [
             "Trustworthiness (0 to 1) asks whether samples that are neighbors in the latent space are also neighbors in the full "
@@ -299,11 +322,8 @@ def summary_page(a, n):
     rows += [f"{e['key']:<18} {e['status']}" for e in skipped]
     guide = [_seed_line(a) + " The next page explains seeds, the evaluation space, references, and memorization."] if _seed_line(a) else []
     blocks.append(("Models run (headline metrics; details on the metrics page)", guide + ["```" + "\n".join(rows or ["none"]) + "```"]))
-    if a["downstream"]:
-        d = a["downstream"]
-        lines = [f"Target class(es) {', '.join(d['targets'])}; real-only seed spread (noise level) {_fmt(d.get('noise_level_target_f1'))}"]
-        lines += [f"{n:<28} target F1 {_fmt(r.get('target_f1'))}  macro F1 {_fmt(r.get('macro_f1'))}" for n, r in d["results"].items() if "target_f1" in r]
-        blocks.append(("Objective test: classifier on held-out real images", ["```" + "\n".join(lines) + "```"]))
+    for title, lines in objective_test_tables(a, short=True):
+        blocks.append((title, ["```" + "\n".join(lines) + "```"]))
     if a["recommendation"]:
         recs = [f"- [{u['verdict']}] {u['use']} ({u.get('model_key', '')})" for u in a["recommendation"]["uses"]]
         blocks.append(("Downstream-use verdicts", recs))
@@ -409,22 +429,63 @@ def metrics_pages(a):
     return text_pages("Evaluation metrics (held-out real data)", blocks)
 
 
-def downstream_pages(a):
-    d = a["downstream"]
-    if not d:
+def _arm_line(name, r, keys=("target_f1", "macro_f1", "accuracy")):
+    cells = "".join(f"{_fmt(r.get(f'{k}_mean')):>9} +/- {_fmt(r.get(f'{k}_sd')):<7}" for k in keys)
+    return f"{name:<32}{r.get('runs', [{}])[0].get('n_train', ''):>7}  {cells}"
+
+
+def objective_test_tables(a, short=False):
+    """[(title, lines)] for every objective test that ran. short=True gives the page-1 version."""
+    out = []
+    d = a["downstream"] or {}
+    if d.get("balancing"):
+        b = d["balancing"]
+        head = f"{'training set':<32}{'n':>7}  " + "".join(f"{k + ' (mean +/- sd)':<26}" for k in (("target F1",) if short else ("target F1", "macro F1", "accuracy")))
+        rows = [head] + [_arm_line(n, r, ("target_f1",) if short else ("target_f1", "macro_f1", "accuracy")) for n, r in b["arms"].items()]
+        out.append((f"Objective test: class balancing, target class {', '.join(b['targets'])} (held-out real images, {d.get('seeds_per_arm')} seeds per arm)", rows))
+    if d.get("tstr"):
+        t = d["tstr"]
+        rows = [f"{'training set':<32}{'n':>7}  {'accuracy (mean +/- sd)':<26}{'macro F1 (mean +/- sd)':<26}"]
+        rows += [_arm_line(n, r, ("accuracy", "macro_f1")) for n, r in t["arms"].items()]
+        rows += [f"utility ratio (synthetic / real accuracy): " + ", ".join(f"{k} {_fmt(v)}" for k, v in t["utility_ratio"].items())]
+        out.append(("Objective test: train on synthetic, test on real (held-out real images)", rows))
+    if a["anomaly"]:
+        an = a["anomaly"]
+        cs = an["corruptions"]
+        rows = [f"{'score':<30}" + "".join(f"{c:>17}" for c in cs) + f"{'mean AUROC':>12}"]
+        for n, r in an["results"].items():
+            rows.append(f"{n:<30}" + ("".join(f"{_fmt(r['auroc'][c]):>17}" for c in cs) + f"{_fmt(r['auroc_mean']):>12}"
+                                      if "auroc" in r else f"  {r.get('status', '')}"))
+        out.append((f"Objective test: anomaly detection (AUROC, {an['n_normal']} normal vs {an['n_per_corruption']} corrupted per type)", rows))
+    if a["imputation"]:
+        im = a["imputation"]
+        rows = [f"{'imputer':<30}{'RMSE':>10}{'MAE':>10}"]
+        rows += [f"{n:<30}" + (f"{_fmt(r['rmse']):>10}{_fmt(r['mae']):>10}" if "rmse" in r else f"  {r.get('status', '')}")
+                 for n, r in im["results"].items()]
+        out.append((f"Objective test: imputation ({im['mask_kind']} masking, error on {im['error_scale']} scale; lower is better)", rows))
+    return out
+
+
+def objective_test_pages(a):
+    tables = objective_test_tables(a)
+    if not tables:
         return []
-    lines = [f"{'training set':<30}{'n_train':>9}{'target F1':>11}{'macro F1':>10}{'accuracy':>10}"]
-    for n, r in d["results"].items():
-        if "target_f1" in r:
-            lines.append(f"{n:<30}{r['n_train']:>9}{_fmt(r['target_f1']):>11}{_fmt(r['macro_f1']):>10}{_fmt(r['accuracy']):>10}")
-        else:
-            lines.append(f"{n:<30}  {r.get('status', '')}")
-    blocks = [(None, [f"Target class(es): {', '.join(d['targets'])}. Each was topped up to the largest training class "
-                      f"({', '.join(f'{t}: +{v}' for t, v in d['n_added_per_target'].items())} images). Classifier: {d['classifier']}.",
-                      "```" + "\n".join(lines) + "```",
-                      f"Noise level (target-F1 difference between the two real-only seeds): {_fmt(d.get('noise_level_target_f1'))}. {d.get('notes', '')}"])]
-    blocks.append(("Definitions", [f"- {k}: {v}" for k, v in d.get("definitions", {}).items()]))
-    return text_pages("Objective test: class balancing on held-out real data", blocks)
+    blocks = [(title, ["```" + "\n".join(lines) + "```"]) for title, lines in tables]
+    d = a["downstream"] or {}
+    if d.get("balancing"):
+        b = d["balancing"]
+        blocks.append((None, [f"Each target class was topped up to the largest training class "
+                              f"({', '.join(f'{t}: +{v}' for t, v in b['n_added_per_target'].items())} samples). Classifier: {b['classifier']}. "
+                              f"Real-only seed standard deviation of target F1: {_fmt(b.get('noise_sd_target_f1'))}."]))
+    if a["anomaly"]:
+        blocks.append((None, [a["anomaly"].get("note", "")]))
+    if a["imputation"]:
+        blocks.append((None, [a["imputation"].get("note", "")]))
+    defs = {}
+    for t in (d, a["anomaly"] or {}, a["imputation"] or {}):
+        defs.update(t.get("definitions", {}))
+    blocks.append(("Definitions", [f"- {k}: {v}" for k, v in defs.items()]))
+    return text_pages("Objective tests on held-out real data", blocks)
 
 
 def definitions_page(a):
@@ -441,7 +502,7 @@ CAPTIONS = {
     "count_properties": "Count-level checks for models that generate counts: total counts per sample, and per-feature fraction of zeros.",
     "sample_grid": "Held-out real images (first column block) and each model's samples, one row per class. Conditional models were asked for the class of the row; unconditional models' samples are not sorted by class.",
     "label_agreement": "Per class: share of each model's images that the evaluation classifier assigns to the requested class; gray bars are the classifier's accuracy on held-out real images (the ceiling).",
-    "downstream": "Class-balancing test: F1 for the target class on held-out real images, for a classifier trained on each training set. The gray band spans the two real-only runs (training noise).",
+    "objective_tests": "Objective tests on held-out real data: each bar is the mean over classifier seeds (or the AUROC / error of one score), with error bars of one standard deviation where seeds were repeated.",
     "latent": "Two-dimensional PCA of a VAE's latent codes for held-out samples. A picture for orientation; neighbor-preservation numbers are on the metrics page.",
 }
 
@@ -528,10 +589,11 @@ def limitations_pages(a, untraced):
     if a["is_image"]:
         items.append("Image realism is judged in the feature space of a classifier trained on the same real data; differences that do "
                      "not affect classification (fine texture, staining details) are not measured by these numbers.")
-    d = a["downstream"]
-    if d:
-        items.append("The class-balancing test uses one classifier architecture and one seed per augmented training set; "
-                     f"differences below the real-only seed spread ({_fmt(d.get('noise_level_target_f1'))}) are not meaningful.")
+    if (a["downstream"] or {}).get("balancing") or (a["downstream"] or {}).get("tstr"):
+        items.append("Classifier-based tests use one classifier architecture and three seeds per training set; three seeds give a "
+                     "rough spread, not a confidence interval.")
+    if a["anomaly"]:
+        items.append("Anomalies in the anomaly test are synthetic corruptions of real samples; detection of real anomalies was not measured.")
     if not a["critique"]:
         items.append("No independent critique was run for this report.")
     if a["findings"]:
@@ -570,7 +632,7 @@ def build(dataset, n, allow_untraced=False):
         sys.exit("ERROR: fix findings.md so every number comes from metrics/run/profile JSON, then rerun.")
 
     pages = (summary_page(a, n) + guide_pages(a) + objective_page(a) + data_page(a) + models_page(a) + metrics_pages(a)
-             + downstream_pages(a) + definitions_page(a)
+             + objective_test_pages(a) + definitions_page(a)
              + figure_pages(a) + findings_pages(a) + recommendation_pages(a) + critique_pages(a)
              + limitations_pages(a, untraced) + repro_pages(a, n))
 

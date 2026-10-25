@@ -28,7 +28,7 @@ from plan_schema import EVAL_PCA_COMPONENTS, FEATURE_STEPS, ROW_STEPS, TRANSFORM
 
 OUTPUTS = Path(__file__).resolve().parent.parent / "outputs"
 # Bump when this file's output changes for the same plan, so cached prepared/ data is not reused.
-PREP_VERSION = 4
+PREP_VERSION = 5
 
 
 def prep_hash(plan):
@@ -174,6 +174,7 @@ def prepare(plan, out_root=OUTPUTS):
     steps = plan["preprocessing"]
 
     # ── Step 1: row steps ──
+    kept = np.arange(len(X))  # original row index of every kept sample
     for s in (s for s in steps if s["step"] in ROW_STEPS):
         n = int(s["params"]["n_samples"])
         if n < len(X):
@@ -182,7 +183,7 @@ def prepare(plan, out_root=OUTPUTS):
             else:
                 idx = rng.choice(len(X), size=n, replace=False)
             idx = np.sort(idx)
-            X, y = X[idx], (y[idx] if y is not None else None)
+            X, y, kept = X[idx], (y[idx] if y is not None else None), kept[idx]
 
     # ── Step 2: train/test split (held-out real data; never used for fitting anything) ──
     strat = y if (plan["split"].get("stratify") and y is not None) else None
@@ -218,6 +219,8 @@ def prepare(plan, out_root=OUTPUTS):
         np.save(out_dir / "y_train.npy", np.asarray(y[tr]).astype(str))
         np.save(out_dir / "y_test.npy", np.asarray(y[te]).astype(str))
     save_state(out_dir / "state.npz", fitted, pca)
+    # Rows the subsample left out: unused REAL data, used only by headroom_check.py's extra-real-data arm.
+    np.save(out_dir / "kept_idx.npy", kept)
 
     names = metadata.get("feature_names")
     meta = {

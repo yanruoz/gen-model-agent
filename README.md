@@ -47,7 +47,7 @@ The agent's decisions (model choice, hyperparameters, evaluation) depend on the 
 ```
 
 - `--report-number`: defaults to the next free number across `reports/`.
-- `--budget-min`: total training budget the agent plans within (default 20). A model that doesn't fit is recorded as not run, never silently dropped.
+- `--budget-min`: total training budget the agent plans within (default 30). A model that doesn't fit is recorded as not run, never silently dropped.
 - Any folder `data/<name>/` with a `DATA_DESCRIPTION.md` (and optional `## Loading` section) can be run the same way; nothing in the pipeline is specific to these two datasets.
 
 ## Authentication

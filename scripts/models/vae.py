@@ -95,10 +95,11 @@ class VAE(nn.Module):
         return torch.stack(lls).mean(0) - kl
 
     @torch.no_grad()
-    def sample(self, n, c=None, library=None):
-        """Draws n samples from the prior. For nb, `library` (n, 1) gives each sample's total count.
+    def sample(self, n, c=None, library=None, z=None):
+        """Draws n samples. z defaults to prior draws; generate.py passes draws from a density fit to the
+        training latents instead. For nb, `library` (n, 1) gives each sample's total count.
         Returns (n, n_in) samples drawn from the likelihood (not just its mean)."""
-        z = torch.randn(n, self.latent_dim, device=self.mu_head.weight.device)
+        z = z if z is not None else torch.randn(n, self.latent_dim, device=self.mu_head.weight.device)
         p = self.decode(z, c, library)
         if self.likelihood == "nb":
             # Gamma-Poisson mixture = negative binomial with mean mu and inverse dispersion theta.
