@@ -3,7 +3,7 @@
 
    Usage: venv/bin/python scripts/report.py --dataset <d> --report-number <N>
 
-   Pages (generated from JSON; the agent writes only findings.md):
+   Pages (generated from JSON; the agent writes only findings.md). A Contents page with page numbers comes first:
      1 Summary: objective (verbatim), decision, models, headline metrics with a legend, recommendation verdicts
      2 How to read this report        abbreviations, seeds, evaluation space, references, memorization, tests
      3 Metric definitions             every metric and test quantity, before any full table
@@ -28,7 +28,6 @@ import json
 import platform
 import re
 import sys
-import textwrap
 import time
 from pathlib import Path
 
@@ -37,19 +36,51 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
+from matplotlib.font_manager import FontProperties
+from matplotlib.textpath import TextToPath
 
 ROOT = Path(__file__).resolve().parent.parent
 PAGE_SIZE = (8.5, 11)
 plt.rcParams["figure.max_open_warning"] = 0  # a report holds ~20 page figures until written
-WRAP = 112
+TEXT_W = 488  # usable line width in points (8.5in page minus margins); lines are wrapped by measured width
 LINE_H, MIN_Y = 0.0185, 0.05
 INK, MUTED = "#1f1f1e", "#5f5e5a"
 
 
 # ── Text page helpers (adapted from Project 1's report.py) ──
 
-def _wrap(text, width=WRAP, indent=""):
-    return textwrap.wrap(text, width=width, subsequent_indent=indent) or [""]
+_T2P = TextToPath()
+_FONTS = {"p": FontProperties(family="sans-serif", size=8.6), "m": FontProperties(family="monospace", size=7.2),
+          "h": FontProperties(family="sans-serif", size=11, weight="bold"), "c": FontProperties(family="sans-serif", size=8)}
+
+
+def _width(text, kind="p"):
+    return _T2P.get_text_width_height_descent(text.replace("$", "S"), _FONTS[kind], ismath=False)[0]
+
+
+def _wrap(text, kind="p", indent="", max_w=TEXT_W):
+    """Greedy word wrap by rendered width, so wide characters or long headings never run off the page.
+    Splits on single spaces, so aligned columns in monospace rows keep their spacing."""
+    if _width(text, kind) <= max_w:
+        return [text]
+    lines, cur = [], ""
+    for w in text.split(" "):
+        cand = f"{cur} {w}" if cur else w
+        if cur.strip() and _width(cand, kind) > max_w:
+            lines.append(cur.rstrip())
+            cur = indent + w
+        else:
+            cur = cand
+    lines.append(cur.rstrip())
+    out = []
+    for line in lines:  # a single word wider than the line (e.g. a long path) is cut by characters
+        while _width(line, kind) > max_w and len(line) > 1:
+            k = len(line)
+            while k > 1 and _width(line[:k], kind) > max_w:
+                k -= 1
+            out.append(line[:k]); line = indent + line[k:]
+        out.append(line)
+    return out
 
 
 def _block_groups(heading, paras):
@@ -57,12 +88,15 @@ def _block_groups(heading, paras):
     across pages and a heading never sits alone at the bottom of a page."""
     groups = []
     for i, p in enumerate(paras or [""]):
-        lines = [("h", heading)] if heading and i == 0 else []
+        lines = []
+        if heading and i == 0:
+            hl = _wrap(heading, "h")
+            lines = [("h", hl[0])] + [("hc", l) for l in hl[1:]]  # a long heading continues on the next line
         mono = p.startswith("```")
         body = p.strip("`") if mono else p
         for raw_line in body.splitlines() or [""]:
             if mono:
-                lines.append(("m", raw_line))
+                lines += [("m", l) for l in _wrap(raw_line, "m", indent="    ")]
             else:
                 indent = "  " if raw_line.startswith("- ") else ""
                 lines += [("p", l) for l in _wrap(raw_line, indent=indent)]
@@ -72,7 +106,7 @@ def _block_groups(heading, paras):
 
 
 def _height(kind):
-    return {"h": LINE_H * 1.6, "gap": LINE_H * 0.6, "sgap": LINE_H * 0.2}.get(kind, LINE_H)
+    return {"h": LINE_H * 1.6, "hc": LINE_H * 1.25, "gap": LINE_H * 0.6, "sgap": LINE_H * 0.2}.get(kind, LINE_H)
 
 
 def text_pages(title, blocks):
@@ -103,6 +137,9 @@ def text_pages(title, blocks):
                 y -= LINE_H * 0.4
                 ax.text(0.05, y, text, transform=ax.transAxes, fontsize=11, fontweight="bold", va="top", color=INK)
                 y -= LINE_H * 1.2
+            elif kind == "hc":
+                ax.text(0.05, y, text, transform=ax.transAxes, fontsize=11, fontweight="bold", va="top", color=INK)
+                y -= LINE_H * 1.25
             elif kind in ("gap", "sgap"):
                 y -= _height(kind)
             else:
@@ -120,7 +157,7 @@ def figure_page(png, caption):
     fig = plt.figure(figsize=(fig_w, min(fig_w * h / w + 0.8, 10.5)))
     ax = fig.add_axes([0.03, 0.08, 0.94, 0.9]); ax.axis("off")
     ax.imshow(img, interpolation="none")  # embed the 300-dpi source pixels as-is, no resampling
-    fig.text(0.04, 0.02, "\n".join(_wrap(caption, 120)), fontsize=8, color=MUTED, va="bottom")
+    fig.text(0.04, 0.02, "\n".join(_wrap(caption, "c", max_w=fig_w * 72 * 0.92)), fontsize=8, color=MUTED, va="bottom")
     return fig
 
 
@@ -736,6 +773,25 @@ def repro_pages(a, n):
     return text_pages("Reproducibility", [(None, lines)])
 
 
+def contents_page(sections, n, dataset):
+    """One page listing each non-empty section and the page it starts on (the contents page is page 1)."""
+    fig = plt.figure(figsize=PAGE_SIZE)
+    ax = fig.add_axes([0.04, 0.02, 0.92, 0.95]); ax.axis("off")
+    ax.text(0.05, 0.97, f"Generated report {n}: {dataset}", transform=ax.transAxes, fontsize=15, fontweight="bold", va="top", color=INK)
+    ax.text(0.05, 0.925, "Contents", transform=ax.transAxes, fontsize=12, fontweight="bold", va="top", color=INK)
+    y, page = 0.88, 2
+    for title, figs in sections:
+        if not figs:
+            continue
+        ax.text(0.07, y, title, transform=ax.transAxes, fontsize=10, va="top", color=INK)
+        ax.text(0.90, y, str(page), transform=ax.transAxes, fontsize=10, va="top", ha="right", color=INK)
+        ax.plot([0.07 + _width(title, "p") * 10 / 8.6 / (0.92 * 612) + 0.01, 0.865], [y - 0.008] * 2,
+                transform=ax.transAxes, color=MUTED, lw=0.6, ls=(0, (1, 3)))  # dotted leader
+        y -= 0.032
+        page += len(figs)
+    return [fig]
+
+
 def build(dataset, n, allow_untraced=False):
     a = load_all(dataset)
     if not a["plan"] or not a["objective"]:
@@ -747,10 +803,19 @@ def build(dataset, n, allow_untraced=False):
             print(f"  {u}")
         sys.exit("ERROR: fix findings.md so every number comes from metrics/run/profile JSON, then rerun.")
 
-    pages = (summary_page(a, n) + guide_pages(a) + definitions_page(a) + objective_page(a) + data_page(a) + models_page(a)
-             + metrics_pages(a) + objective_test_pages(a)
-             + figure_pages(a) + findings_pages(a) + recommendation_pages(a) + critique_pages(a)
-             + limitations_pages(a, untraced) + repro_pages(a, n))
+    sections = [("Summary", summary_page(a, n)), ("How to read this report", guide_pages(a)),
+                ("Metric definitions", definitions_page(a)), ("Objective interpretation", objective_page(a)),
+                ("Data and preprocessing", data_page(a)), ("Models, hyperparameters, and training", models_page(a)),
+                ("Evaluation metrics", metrics_pages(a)), ("Objective tests", objective_test_pages(a)),
+                ("Figures", figure_pages(a)), ("Findings", findings_pages(a)),
+                ("Downstream use of the generated data", recommendation_pages(a)),
+                ("Critique and revision", critique_pages(a)), ("Limitations", limitations_pages(a, untraced)),
+                ("Reproducibility", repro_pages(a, n))]
+    pages = contents_page(sections, n, a["plan"].get("dataset", ""))
+    for _, figs in sections:
+        pages += figs
+    for i, fig in enumerate(pages, 1):
+        fig.text(0.5, 0.008, f"{i} / {len(pages)}", ha="center", va="bottom", fontsize=7.5, color=MUTED)
 
     pdf_path = ROOT / "reports" / dataset / f"generated_report_{n}.pdf"
     pdf_path.parent.mkdir(parents=True, exist_ok=True)
