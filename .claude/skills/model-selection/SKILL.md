@@ -40,6 +40,8 @@ description: Choose generative model(s) and hyperparameters for the validated ob
 }
 ```
 
+Every `reason` and `hyperparameter_reasons` entry is printed in the report word for word: use plain words, and spell out any abbreviation the report's glossary doesn't define (see `reporting/SKILL.md`).
+
 - `id`: short, unique, `[a-z0-9_]`. Artifacts are keyed `<id>_s<seed>`, so seeds never overwrite each other.
 - `serves_tasks`: the tasks from `objective.json` (`effective_task` and `secondary_tasks`) this model is for. The validator checks the family has the needed capability (`plan_schema.TASK_NEEDS` / `MODEL_CAPABILITIES`).
 - `estimated_minutes`: per seed, from the timing table below. Planned minutes x seeds, summed over models, must fit `budget_min` (from the run prompt; default 30).

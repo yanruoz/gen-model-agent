@@ -56,6 +56,14 @@ Compare against the **reference** values stored next to each metric, not against
 - `recommended` needs supporting evidence and no contradicting metric. `conditional` means "yes, if ..." and the condition goes in `caveats`. `not_recommended` is a normal, useful answer: say what failed.
 - If a simpler alternative did as well (PCA baseline, resampling), say so in the rationale.
 
+## Writing the entries
+
+These entries are printed in the report, so write them for a reader, not for the validator:
+
+- **Name each `use` in plain words** a reader outside this project understands: "test data for software that processes count matrices", not "marginal-level test fixture".
+- **`compared_to` is short and flat**: a metric path and value, or a plain phrase such as "1 = perfect agreement". No nested parentheses.
+- **Privacy appears once.** The full disclaimer goes in `privacy_statement`. A sharing use's caveat gives only the condition (a privacy review or a formally private training method); other uses need no privacy caveat. Don't refer to field names such as `privacy_statement` in the text; say "see the Privacy section".
+
 ## Privacy (hard rule)
 
 This pipeline measures **memorization** (distance from synthetic to training samples). That is evidence about one kind of leakage, not a privacy guarantee. Whenever the objective or a use mentions sharing, releasing, publishing, or privacy:

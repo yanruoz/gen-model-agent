@@ -5,7 +5,7 @@ description: Write findings.md and build reports/<dataset>/generated_report_<N>.
 
 # Reporting
 
-`scripts/report.py` builds the PDF from the JSON artifacts: summary, a "How to read this report" page (run names and seeds, the evaluation space and its variance explained, reference values, how memorization is measured, and a caution for models trained in PCA space), objective interpretation, data and preprocessing (with every `reason`), models and training, metrics tables, metric definitions, figures, recommendation, critique, limitations, and reproducibility. **You write one file: `outputs/<dataset>/findings.md`**, the written interpretation. Since `reason` fields are printed verbatim, a vague reason in `plan.json` becomes a vague sentence in the report. Fix the plan, not the findings.
+`scripts/report.py` builds the PDF from the JSON artifacts: summary (with a legend for its headline metrics), a "How to read this report" page (abbreviations, run names and seeds, the evaluation space and its variance explained, reference values, how memorization is measured, and a caution for models trained in PCA space), metric definitions, objective interpretation, data and preprocessing (with every `reason`), models and training, metrics tables, figures, recommendation, critique, limitations, and reproducibility. **You write one file: `outputs/<dataset>/findings.md`**, the written interpretation. Since `reason` fields are printed verbatim, a vague reason in `plan.json` becomes a vague sentence in the report. Fix the plan, not the findings.
 
 ## Steps
 
@@ -13,11 +13,11 @@ description: Write findings.md and build reports/<dataset>/generated_report_<N>.
 
 2. **Write `findings.md`.** Markdown, `## ` headings, blank lines between paragraphs. About one to two pages. Sections, in this order:
    - `## Summary`: 3–5 sentences, shown on page 1. What was asked, what the agent decided, the main result in numbers, and the bottom-line recommendation.
-   - `## What each model produced`: per model, the headline metrics, always next to their real-vs-real reference (C2ST vs reference, MMD vs reference), precision and recall, memorization, and training outcome (kept epoch, why it stopped).
+   - `## What each model produced`: per model, what the results show and how the seeds compare, citing only the numbers that support each point (always next to their real-vs-real reference), plus anything about training a reader needs (e.g. stopped at the time cap). **Don't restate the metric tables**: the report prints every metric already, so a paragraph that lists C2ST, MMD, precision, recall, DCR, and the kept epoch for each run adds length, not information.
    - `## What the figures show`: what you saw in each figure, described plainly ("synthetic samples fill the space between the real clusters").
    - `## How the models compare`: only on metrics computed in the same space (fidelity, memorization, feature stats). **Never compare likelihoods across models with different input spaces**; say they are not comparable. Name which model is better for which purpose, not an overall winner, unless one is better on every shared metric. If one model is trained on PCA scores and realism is scored in a PCA space, say that this may favor it on the realism metrics, and weigh the per-feature checks accordingly.
    - `## Answer to the objective`: did the run meet the success criterion in `objective.json`? Yes, partly, or no, with the numbers.
-   - `## Limitations`: anything specific to this run that a reader must know (merged into the Limitations page).
+   - `## Limitations`: anything specific to this run that a reader must know (merged into the Limitations page). `report.py` already adds these automatically, so don't repeat them: the evaluation space's size and variance explained, models trained on PCA scores being favored, the classifier-feature limit for images, classifier tests using three seeds, synthetic anomalies, and failed or budget-skipped runs.
 
 3. **Build:**
    ```bash
@@ -38,3 +38,7 @@ description: Write findings.md and build reports/<dataset>/generated_report_<N>.
 - **No privacy claims.** Memorization metrics are evidence about copying, not a privacy guarantee. Same forbidden phrases as `downstream-use/SKILL.md`.
 - **No claims the data can't support.** For unlabeled data, don't name types or classes the data doesn't label; describe structure in the figures only, as exploratory.
 - **Plain, direct language.** Short sentences, no promotional wording, no unexplained jargon.
+- **Define abbreviations.** The report's "How to read this report" page already defines AUC/AUROC, C2ST, MMD, DCR, PCA/PC, kNN, ELBO, NLL, VAE, NB, GAN, CNN, FID, TSTR, F1, RMSE, and MAE. Any other abbreviation (for example UMI, QC, H&E) is spelled out at first use in `findings.md`, or replaced with plain words.
+- **Use words, not field names.** Write "C2ST AUC", "DCR ratio", "share too close", "representation learning", not `c2st_auc`, `dcr_ratio`, `too_close_fraction`, `representation_learning`. Run names (`vae_nb_s0`) stay as they are.
+- **State the privacy caveat once.** The Privacy section (from `recommendation.json`'s `privacy_statement`) carries it. In `findings.md`, mention privacy only where a finding needs it, in one short sentence that points to that section; don't repeat the full disclaimer in several sections.
+- **Use one format for a quantity.** For example, variance explained as a percent everywhere (22.6%), not 0.2258 in one place and 22.6% in another.

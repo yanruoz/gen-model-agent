@@ -5,7 +5,7 @@ description: Turn profile.json + DATA_DESCRIPTION.md into plan.json's split and 
 
 # Preprocessing for generative models
 
-Read `profile.json`, `profile_summary.md`, and `DATA_DESCRIPTION.md`. Decide the `split` block and the `preprocessing` list of `plan.json` (full schema in `model-selection/SKILL.md`). Every step needs a `reason` that cites this dataset (a number from the profile, a fact from the description).
+Read `profile.json`, `profile_summary.md`, and `DATA_DESCRIPTION.md`. Decide the `split` block and the `preprocessing` list of `plan.json` (full schema in `model-selection/SKILL.md`). Every step needs a `reason` that cites this dataset (a number from the profile, a fact from the description). Reasons are printed in the report word for word: write them in plain words, and spell out any abbreviation the report's glossary doesn't define (see `reporting/SKILL.md`).
 
 `scripts/preprocess.py` runs these steps deterministically. It always does them in the same order: row steps, then the train/test split, then feature selection (fit on the training split only), then transforms (fit on the training split only). It saves three views of the data that models can choose between via `input_space`:
 

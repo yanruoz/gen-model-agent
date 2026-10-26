@@ -4,18 +4,19 @@
    Usage: venv/bin/python scripts/report.py --dataset <d> --report-number <N>
 
    Pages (generated from JSON; the agent writes only findings.md):
-     1 Summary: objective (verbatim), decision, models, headline metrics, recommendation verdicts
-     2 Objective interpretation       objective.json (+ ambiguities)
-     3 Data and preprocessing         profile.json, plan split/preprocessing with reasons, evaluation space
-     4 Models and training            plan models: hyperparameters with reasons; run sidecars: epochs, stopping
-     5 Evaluation metrics             metrics/*.json, grouped, with real-vs-real references
-     6 Metric definitions
-     7 Figures                        figures/*.png
-     8 Findings                       findings.md (agent-written)
-     9 Downstream use                 recommendation.json
-    10 Critique and revision          critique.json, if any
-    11 Limitations                    auto-collected + findings.md "## Limitations"
-    12 Reproducibility                command, seeds, config hashes, versions, timing
+     1 Summary: objective (verbatim), decision, models, headline metrics with a legend, recommendation verdicts
+     2 How to read this report        abbreviations, seeds, evaluation space, references, memorization, tests
+     3 Metric definitions             every metric and test quantity, before any full table
+     4 Objective interpretation       objective.json (+ ambiguities)
+     5 Data and preprocessing         profile.json, plan split/preprocessing with reasons
+     6 Models and training            plan models: hyperparameters with reasons; run outcome, epochs, stopping
+     7 Evaluation metrics             metrics/*.json, grouped, with real-vs-real references; objective tests
+     8 Figures                        figures/*.png
+     9 Findings                       findings.md (agent-written)
+    10 Downstream use                 recommendation.json
+    11 Critique and revision          critique.json, if any
+    12 Limitations                    auto-collected + findings.md "## Limitations"
+    13 Reproducibility                command, seeds, config hashes, versions, timing
 
    Before writing, every decimal number in findings.md is traced to a value in the JSON artifacts; any
    that can't be traced are listed and the script exits 1 without writing (use --allow-untraced to
@@ -40,7 +41,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 ROOT = Path(__file__).resolve().parent.parent
 PAGE_SIZE = (8.5, 11)
 plt.rcParams["figure.max_open_warning"] = 0  # a report holds ~20 page figures until written
-WRAP = 92
+WRAP = 112
 LINE_H, MIN_Y = 0.0185, 0.05
 INK, MUTED = "#1f1f1e", "#5f5e5a"
 
@@ -51,11 +52,12 @@ def _wrap(text, width=WRAP, indent=""):
     return textwrap.wrap(text, width=width, subsequent_indent=indent) or [""]
 
 
-def _block_lines(heading, paras):
-    lines = []
-    if heading:
-        lines.append(("h", heading))
-    for p in paras:
+def _block_groups(heading, paras):
+    """One group of lines per paragraph (the heading joins the first), so a short paragraph is never split
+    across pages and a heading never sits alone at the bottom of a page."""
+    groups = []
+    for i, p in enumerate(paras or [""]):
+        lines = [("h", heading)] if heading and i == 0 else []
         mono = p.startswith("```")
         body = p.strip("`") if mono else p
         for raw_line in body.splitlines() or [""]:
@@ -64,8 +66,13 @@ def _block_lines(heading, paras):
             else:
                 indent = "  " if raw_line.startswith("- ") else ""
                 lines += [("p", l) for l in _wrap(raw_line, indent=indent)]
-        lines.append(("gap", ""))
-    return lines
+        lines.append(("sgap" if p.startswith("- ") else "gap", ""))  # list items sit closer together
+        groups.append(lines)
+    return groups
+
+
+def _height(kind):
+    return {"h": LINE_H * 1.6, "gap": LINE_H * 0.6, "sgap": LINE_H * 0.2}.get(kind, LINE_H)
 
 
 def text_pages(title, blocks):
@@ -74,14 +81,17 @@ def text_pages(title, blocks):
     pages, cur, y = [], [], 0.0
     capacity = 0.93 - MIN_Y
     for heading, paras in blocks:
-        lines = _block_lines(heading, paras)
-        for kind, text in lines:
-            h = {"h": LINE_H * 1.6, "gap": LINE_H * 0.6}.get(kind, LINE_H)
-            if y + h > capacity and cur:
+        for group in _block_groups(heading, paras):
+            g_h = sum(_height(k) for k, _ in group)
+            if y + g_h > capacity and cur and g_h <= capacity / 4:  # start short paragraphs on a fresh page
                 pages.append(cur); cur, y = [], 0.0
-            cur.append((kind, text)); y += h
+            for kind, text in group:  # long paragraphs still split line by line
+                h = _height(kind)
+                if y + h > capacity and cur:
+                    pages.append(cur); cur, y = [], 0.0
+                cur.append((kind, text)); y += h
     pages.append(cur)
-    pages = [pg for pg in pages if any(kind != "gap" for kind, _ in pg)] or [[]]  # no spacing-only pages
+    pages = [pg for pg in pages if any(kind not in ("gap", "sgap") for kind, _ in pg)] or [[]]  # no spacing-only pages
     figs = []
     for i, lines in enumerate(pages):
         fig = plt.figure(figsize=PAGE_SIZE)
@@ -93,8 +103,8 @@ def text_pages(title, blocks):
                 y -= LINE_H * 0.4
                 ax.text(0.05, y, text, transform=ax.transAxes, fontsize=11, fontweight="bold", va="top", color=INK)
                 y -= LINE_H * 1.2
-            elif kind == "gap":
-                y -= LINE_H * 0.6
+            elif kind in ("gap", "sgap"):
+                y -= _height(kind)
             else:
                 ax.text(0.06, y, text, transform=ax.transAxes, va="top", color=INK,
                         fontsize=7.2 if kind == "m" else 8.6, family="monospace" if kind == "m" else "sans-serif")
@@ -190,6 +200,81 @@ def _fmt(v):
     return str(v)
 
 
+# ── Readable names (the JSON field name is still shown once, on the glossary page, for tracing) ──
+
+LABELS = {
+    "n_compared": "samples compared", "mmd2": "MMD²", "mmd2_reference": "  MMD² reference",
+    "c2st_auc": "C2ST AUC", "c2st_auc_reference": "  C2ST AUC reference", "precision": "precision", "recall": "recall",
+    "frechet_distance": "Fréchet distance", "frechet_distance_reference": "  Fréchet distance reference",
+    "label_agreement": "label agreement", "label_agreement_reference": "  label agreement reference",
+    "dcr_median_synthetic": "median DCR, synthetic", "dcr_median_heldout": "median DCR, held-out real",
+    "dcr_ratio": "DCR ratio", "too_close_fraction": "share too close",
+    "mean_corr": "corr. of feature means", "var_corr": "corr. of feature variances",
+    "zero_frac_corr": "corr. of zero fractions", "zero_frac_synthetic": "zero fraction, synthetic",
+    "zero_frac_heldout": "zero fraction, held-out real", "library_median_ratio": "median library size ratio",
+    "train_mean": "mean (log-)likelihood, training", "heldout_mean": "mean (log-)likelihood, held-out",
+    "per_dimension_heldout": "held-out, per dimension", "latent_dim": "latent size",
+    "trustworthiness": "trustworthiness", "trustworthiness_pca_baseline": "  same-size PCA",
+    "knn_overlap": "kNN overlap", "knn_overlap_pca_baseline": "  same-size PCA",
+    "target_f1": "target-class F1", "macro_f1": "macro F1", "accuracy": "accuracy", "utility_ratio": "utility ratio",
+    "noise_sd": "seed standard deviation", "auroc": "AUROC", "auroc_mean": "mean AUROC", "rmse": "RMSE", "mae": "MAE",
+    "baseline_mean": "baseline: mean", "baseline_knn": "baseline: kNN", "baseline_knn_distance": "baseline: kNN distance",
+    "baseline_pca_reconstruction": "baseline: PCA reconstruction", "real_same_size": "real images",
+    "real": "real only", "resampled": "real + resampled target class", "extra_real": "real + new real target images",
+    "feature_shuffle": "feature shuffle", "doublet": "doublet", "blend": "blend", "noise": "noise",
+    "anomaly": "anomaly test", "imputation": "imputation test",
+}
+GROUP_TITLES = {"fidelity": "Fidelity", "conditional": "Class conditioning", "memorization": "Memorization",
+                "memorization_pixels": "Memorization (raw pixels)", "feature_stats": "Per-feature statistics",
+                "likelihood": "Likelihood", "representation": "Representation"}
+TASK_NAMES = {"proceed": "proceed", "proceed_adapted": "proceed, adapted", "decline": "decline"}
+VERDICTS = {"recommended": "Recommended", "conditional": "Conditional", "not_recommended": "Not recommended"}
+# Generic path segments dropped when a metric path like vae_nb_s0.fidelity.c2st_auc is shown in words.
+_PATH_SKIP = {"metrics", "results", "arms", "fidelity", "memorization", "feature_stats", "representation", "likelihood",
+              "conditional", "downstream", "tstr", "balancing"}
+
+ABBREVIATIONS = [
+    "AUC / AUROC: area under the ROC (receiver operating characteristic) curve; 0.5 = chance, 1 = perfect separation.",
+    "C2ST: classifier two-sample test. A classifier is trained to tell synthetic from real samples; its AUC is the score.",
+    "MMD²: squared maximum mean discrepancy, a kernel distance between two sets of samples (RBF = Gaussian kernel).",
+    "DCR: distance to closest record, the distance from a sample to its nearest training sample.",
+    "PCA / PCs: principal component analysis / principal components.",
+    "kNN, 5-NN: k nearest neighbors; a 5-NN radius is the distance from a sample to its 5th nearest neighbor.",
+    "ELBO: evidence lower bound, the VAE's training objective (a lower bound on log-likelihood). NLL: negative log-likelihood.",
+    "VAE: variational autoencoder. NB: negative binomial (a count distribution). GAN: generative adversarial network.",
+    "CNN: convolutional neural network. FID: Fréchet Inception Distance (here computed on the evaluation classifier's features).",
+    "TSTR: train on synthetic, test on real. F1: harmonic mean of precision and recall for one class; macro F1 averages it over classes.",
+    "RMSE / MAE: root mean squared error / mean absolute error.",
+]
+
+
+def _label(name):
+    if name in LABELS:
+        return LABELS[name].strip()
+    if name.startswith("synthetic_"):
+        return f"synthetic: {name[len('synthetic_'):]}"
+    if name.startswith("real_plus_"):
+        return f"real + synthetic: {name[len('real_plus_'):]}"
+    return name.replace("_", " ")
+
+
+def _task(t):
+    return t.replace("_", " ") if t else "none"
+
+
+def _path_words(path):
+    """'vae_nb_s0.representation.trustworthiness' -> 'vae_nb_s0, trustworthiness'."""
+    parts = [p for p in path.split(".") if p not in _PATH_SKIP]
+    return ", ".join(p if re.search(r"_s\d+$", p) else _label(p) for p in parts)
+
+
+def _readable_paths(text, a):
+    """Replace metric paths inside free text (e.g. an evidence 'compared_to') with words."""
+    roots = set(a["metrics"]) | {"anomaly", "imputation", "downstream"}
+    return re.sub(r"\b[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+\b",
+                  lambda m: _path_words(m.group(0)) if m.group(0).split(".")[0] in roots else m.group(0), text)
+
+
 def _seed_line(a):
     models = [(m["id"], m.get("seeds", [])) for m in a["plan"].get("models", [])]
     if not models:
@@ -205,7 +290,7 @@ def _pca_models(a):
 
 
 def guide_pages(a):
-    meta, blocks = a["meta"], []
+    meta, blocks = a["meta"], [("Abbreviations", [f"- {x}" for x in ABBREVIATIONS])]
     line = _seed_line(a)
     if line:
         multi = any(len(m.get("seeds", [])) > 1 for m in a["plan"].get("models", []))
@@ -225,7 +310,8 @@ def guide_pages(a):
             "poor judge of small, domain-specific images, and too heavy to run here. The classifier never sees synthetic or held-out "
             "images during training, and the same classifier scores every model.",
             "Its features only capture what helps tell the classes apart, so two image sets can look alike to it and still differ in "
-            "ways it ignores. The sample grid figure is the visual check. memorization_pixels repeats the DCR check on raw pixels."]))
+            "ways it ignores. The sample grid figure is the visual check. The 'Memorization (raw pixels)' table repeats the DCR "
+            "check on raw pixels."]))
     elif meta:
         blocks.append(("Where realism is measured: the evaluation space", [
             f"Synthetic and held-out real samples are compared in one shared space: the first {meta.get('eval_components')} "
@@ -244,14 +330,14 @@ def guide_pages(a):
     blocks.append(("How memorization is characterized", [
         "For each sample, DCR (distance to closest record) is the distance to its nearest training sample in the evaluation space. "
         "The held-out real samples give the yardstick: how close a new sample from the same population typically lands to some "
-        "training sample. dcr_ratio compares the median synthetic DCR to the median held-out DCR (about 1 = as far as new real "
-        "data; well below 1 = suspiciously close). too_close_fraction counts synthetic samples closer than the 5th percentile "
-        "of held-out DCRs (about 0.05 is expected without copying).",
+        "training sample. The DCR ratio is the median synthetic DCR divided by the median held-out DCR (about 1 = as far as new "
+        "real data; well below 1 = suspiciously close; well above 1 = samples unlike the real data). The share too close counts "
+        "synthetic samples closer than the 5th percentile of held-out DCRs (about 0.05 is expected without copying).",
         "This detects near-copies of training samples. It is not a privacy guarantee: it does not test membership inference, "
         "attribute inference, or any formal property such as differential privacy."]))
     if any("conditional" in m for m in a["metrics"].values()):
         blocks.append(("Do generated images belong to the requested class?", [
-            "label_agreement is the share of synthetic images that the evaluation classifier assigns to the class they were generated "
+            "Label agreement is the share of synthetic images that the evaluation classifier assigns to the class they were generated "
             "for. Its reference is the classifier's accuracy on held-out real images, which is what a perfect class-conditional generator "
             "would reach. Low agreement means the model's class conditioning is weak, which matters directly for class balancing."]))
     d = a["downstream"] or {}
@@ -266,7 +352,7 @@ def guide_pages(a):
     if d.get("tstr"):
         blocks.append(("Could synthetic data replace the real data? (train on synthetic, test on real)", [
             "The same classifier is trained on each model's labeled synthetic images only, and on the same number of real training "
-            "images, three seeds each, and both are scored on held-out real images. utility_ratio is synthetic accuracy divided by real "
+            "images, three seeds each, and both are scored on held-out real images. The utility ratio is synthetic accuracy divided by real "
             "accuracy: 1 means the synthetic data is as useful for training this classifier as real data."]))
     if a["anomaly"]:
         blocks.append(("The anomaly-detection test", [
@@ -302,30 +388,44 @@ def guide_pages(a):
 
 def summary_page(a, n):
     o, p = a["objective"], a["plan"]
+    task_line = f"Task: {_task(o.get('task'))}" + (f" (also: {', '.join(map(_task, o['secondary_tasks']))})" if o.get("secondary_tasks") else "")
+    task_line += f"  |  Decision: {TASK_NAMES.get(o.get('decision'), o.get('decision'))}"
+    if o.get("decision") != "proceed":
+        task_line += f"  |  Task actually run: {_task(o.get('effective_task'))}"
     blocks = [("Objective (as given)", [f"\"{o.get('raw_text', '')}\""]),
-              ("Agent's decision", [f"Task: {o.get('task')}  |  decision: {o.get('decision')}  |  task run: {o.get('effective_task')}"
-                                    + (f"  |  also: {', '.join(o['secondary_tasks'])}" if o.get("secondary_tasks") else ""),
-                                    o.get("decision_reason", "")])]
+              ("Agent's decision", [task_line, o.get("decision_reason", "")])]
     rows = []
     for k in a["keys"]:
         m = a["metrics"].get(k, {})
         f = m.get("fidelity", {})
         if a["is_image"]:
-            rows.append(f"{k:<16} {m.get('family', ''):<9} FD {_fmt(f.get('frechet_distance'))} (ref {_fmt(f.get('frechet_distance_reference'))})"
-                        f"  C2ST {_fmt(f.get('c2st_auc'))} (ref {_fmt(f.get('c2st_auc_reference'))})"
-                        f"  label agr. {_fmt(m.get('conditional', {}).get('label_agreement'))}")
+            c = m.get("conditional", {})
+            rows.append(f"{k:<24} Fréchet dist. {_fmt(f.get('frechet_distance'))} (ref {_fmt(f.get('frechet_distance_reference'))})"
+                        f"  C2ST AUC {_fmt(f.get('c2st_auc'))} (ref {_fmt(f.get('c2st_auc_reference'))})"
+                        + (f"  label agreement {_fmt(c.get('label_agreement'))} (ref {_fmt(c.get('label_agreement_reference'))})" if c else ""))
         else:
-            rows.append(f"{k:<18} {m.get('family', ''):<6} C2ST {_fmt(f.get('c2st_auc'))} (real-vs-real {_fmt(f.get('c2st_auc_reference'))})"
+            rows.append(f"{k:<14} C2ST AUC {_fmt(f.get('c2st_auc'))} (ref {_fmt(f.get('c2st_auc_reference'))})"
                         f"  precision {_fmt(f.get('precision'))}  recall {_fmt(f.get('recall'))}"
                         f"  DCR ratio {_fmt(m.get('memorization', {}).get('dcr_ratio'))}")
     skipped = [e for e in a["run_log"].get("entries", []) if e.get("status") != "ok"]
-    rows += [f"{e['key']:<18} {e['status']}" for e in skipped]
-    guide = [_seed_line(a) + " The next page explains seeds, the evaluation space, references, and memorization."] if _seed_line(a) else []
-    blocks.append(("Models run (headline metrics; details on the metrics page)", guide + ["```" + "\n".join(rows or ["none"]) + "```"]))
+    rows += [f"{e['key']:<18} {'not run (did not fit the budget)' if e['status'] == 'not_run_budget' else e['status']}" for e in skipped]
+    guide = ["Run names are <model id>_s<seed>. 'How to read this report', right after this summary, defines every abbreviation "
+             "and explains seeds and the references."]
+    if a["is_image"]:
+        legend = ("Fréchet distance: distance between real and synthetic feature distributions (lower is better). C2ST AUC: how well "
+                  "a classifier tells synthetic from real (0.5 = indistinguishable). Label agreement: share of generated images "
+                  "recognized as their requested class. ref = the value two real samples give.")
+    else:
+        legend = ("C2ST AUC: how well a classifier tells synthetic from real cells (0.5 = indistinguishable). Precision: share "
+                  "of synthetic samples near real ones. Recall: share of real samples covered. DCR ratio: distance of synthetic "
+                  "samples to training data relative to new real data (about 1 = no sign of copying). ref = the value two real "
+                  "samples give.")
+    blocks.append(("Models run (headline metrics; full tables on the metrics pages)",
+                   guide + ["```" + "\n".join(rows or ["none"]) + "```", legend]))
     for title, lines in objective_test_tables(a, short=True):
         blocks.append((title, ["```" + "\n".join(lines) + "```"]))
     if a["recommendation"]:
-        recs = [f"- [{u['verdict']}] {u['use']} ({u.get('model_key', '')})" for u in a["recommendation"]["uses"]]
+        recs = [f"- {VERDICTS.get(u['verdict'], u['verdict'])}: {u['use']} ({u.get('model_key', '')})" for u in a["recommendation"]["uses"]]
         blocks.append(("Downstream-use verdicts", recs))
     if a["findings"]:
         summ = re.search(r"^##\s*Summary\s*$(.*?)(?=^##\s|\Z)", a["findings"], re.M | re.S)
@@ -337,10 +437,12 @@ def summary_page(a, n):
 
 def objective_page(a):
     o = a["objective"]
-    blocks = [("Interpretation", [f"Primary task: {o.get('task')}", f"Secondary tasks: {', '.join(o.get('secondary_tasks') or []) or 'none'}",
+    blocks = [("Interpretation", [f"Primary task: {_task(o.get('task'))}",
+                                  f"Secondary tasks: {', '.join(map(_task, o.get('secondary_tasks') or [])) or 'none'}",
                                   o.get("interpretation_reason", "")]),
               ("Success criterion", [o.get("success_criterion", "")]),
-              ("Whether to model, and how", [f"Decision: {o.get('decision')} (task actually run: {o.get('effective_task')})", o.get("decision_reason", "")])]
+              ("Whether to model, and how", [f"Decision: {TASK_NAMES.get(o.get('decision'), o.get('decision'))} "
+                                             f"(task actually run: {_task(o.get('effective_task'))}). The reason is given in the summary."])]
     if o.get("ambiguities"):
         blocks.append(("Other readings considered", [f"- {x}" for x in o["ambiguities"]]))
     return text_pages("Objective interpretation", blocks)
@@ -351,24 +453,21 @@ def data_page(a):
     what = re.search(r"^##\s*What this is\s*$(.*?)(?=^##\s|\Z)", a["desc"], re.M | re.S)
     prof = [f"{pr.get('n_samples', 0):,} samples x {pr.get('n_features', 0):,} features; modality {pr.get('modality')}"
             + (f" {tuple(pr['image_shape'])}" if pr.get("image_shape") else ""),
-            f"Sparsity {_fmt(pr.get('sparsity'))}; value range {_fmt(pr.get('value_range'))}; non-negative integers: {pr.get('is_nonneg_integer')}",
-            f"Labels: {'yes, ' + str(pr.get('n_classes')) + ' classes, imbalance ratio ' + _fmt(pr.get('imbalance_ratio')) if pr.get('has_labels') else 'none'}"]
+            f"Sparsity: {100 * (pr.get('sparsity') or 0):.1f}% zeros; value range {_fmt(pr.get('value_range'))}; non-negative integers: {pr.get('is_nonneg_integer')}",
+            f"Labels: {'yes, ' + str(pr.get('n_classes')) + ' classes, largest/smallest class ratio ' + _fmt(pr.get('imbalance_ratio')) if pr.get('has_labels') else 'none'}"]
     blocks = []
     if what:
         blocks.append(("Dataset (from DATA_DESCRIPTION.md)", [" ".join(what.group(1).split())]))
     blocks.append(("Profile", prof))
     sp = p.get("split", {})
-    blocks.append(("Held-out split", [f"test_fraction {sp.get('test_fraction')}, stratified: {bool(sp.get('stratify'))}"
+    blocks.append(("Held-out split", [f"Held-out fraction {sp.get('test_fraction')}, stratified by class: {'yes' if sp.get('stratify') else 'no'}"
                                       + (f" -> {meta.get('n_train')} training / {meta.get('n_test')} held-out samples" if meta else ""),
                                       f"Reason: {sp.get('reason', '')}"]))
     steps = [f"- {s['step']} {json.dumps(s.get('params')) if s.get('params') else ''}: {s.get('reason', '')}" for s in p.get("preprocessing", [])]
     blocks.append(("Preprocessing (applied identically for every model; fit on training data only)", steps or ["none"]))
     if meta and not a["is_image"]:
         blocks.append(("Evaluation space", [
-            f"All models are scored in one shared space: PCA of the transformed data with {meta.get('eval_components')} components "
-            f"({_fmt(meta.get('eval_variance_explained'))} of training variance), fit on the training split. The number of components "
-            f"is the {meta.get('eval_components_rule', '')}: a PCA with more components overfits the training data, and a classifier "
-            "could then tell training from held-out real samples apart, biasing every comparison."]))
+            f"PCA with {meta.get('eval_components')} components, fit on the training split; see 'How to read this report'."]))
     return text_pages("Data and preprocessing", blocks)
 
 
@@ -376,9 +475,17 @@ def models_page(a):
     blocks = []
     for m in a["plan"].get("models", []):
         hp, rs = m.get("hyperparameters", {}), m.get("hyperparameter_reasons", {})
+        entries = [e for e in a["run_log"].get("entries", []) if e.get("model_id") == m["id"]]
+        if m.get("status") == "not_run_budget":
+            outcome = "not run (did not fit the budget)"
+        elif entries:
+            outcome = "; ".join(f"{e['key']} {e.get('trained', 'ok') if e.get('status') == 'ok' else e.get('status')}" for e in entries)
+        else:
+            outcome = "not run"
         lines = [f"Family: {m['family']}{' (conditional)' if m.get('conditional') else ''}; input: {m.get('input_space')}; "
-                 f"seeds {m.get('seeds')}; serves {', '.join(m.get('serves_tasks', []))}; status {m.get('status', 'planned')}; "
+                 f"seeds {m.get('seeds')}; serves {', '.join(map(_task, m.get('serves_tasks', [])))}; "
                  f"estimated {m.get('estimated_minutes')} min/seed",
+                 f"Outcome: {outcome}",
                  f"Why this model: {m.get('reason', '')}"]
         lines += [f"- {k} = {_fmt(v)}: {rs.get(k, '')}" for k, v in hp.items()]
         for k, r in a["runs"].items():
@@ -386,7 +493,7 @@ def models_page(a):
                 lines.append(f"Training ({k}): {r['epochs_run']} of {r['epochs_planned']} max epochs, kept epoch {r['best_epoch']} "
                              f"({r['stop_reason']}); {r['minutes']} min on {r['device']}; {r['n_fit']} fit / {r['n_val']} validation samples"
                              + (f"; {r['n_parameters']:,} parameters" if r.get("n_parameters") else "")
-                             + (f"; input PCA keeps {_fmt(r['input_pca_variance_explained'])} of variance" if r.get("input_pca_variance_explained") else ""))
+                             + (f"; input PCA keeps {100 * r['input_pca_variance_explained']:.1f}% of variance" if r.get("input_pca_variance_explained") else ""))
         blocks.append((m["id"], lines))
     if a["plan"].get("evaluation_notes"):
         blocks.append(("Evaluation focus", [a["plan"]["evaluation_notes"]]))
@@ -409,29 +516,26 @@ def metrics_pages(a):
                     names.append(n)
         if not names:
             continue
-        w = max(len(n) for n in names) + 2
+        w = max(len(LABELS.get(n, _label(n))) for n in names) + 2
         lines = [" " * w + "".join(f"{k:>16}" for k in keys)]
         for n in names:
-            lines.append(f"{n:<{w}}" + "".join(f"{_fmt(a['metrics'][k].get(g, {}).get(n)):>16}" for k in keys))
+            lines.append(f"{LABELS.get(n, _label(n)):<{w}}" + "".join(f"{_fmt(a['metrics'][k].get(g, {}).get(n)):>16}" for k in keys))
         notes = {a["metrics"][k][g].get("warning") or a["metrics"][k][g].get("note") for k in keys if g in a["metrics"][k]} - {None}
         if g == "likelihood":
             notes.add("Likelihoods are in each model's own input space and units; do not compare them across models with different input spaces.")
-        blocks.append((g.replace("_", " ").capitalize(), ["```" + "\n".join(lines) + "```"] + sorted(notes)))
+        blocks.append((GROUP_TITLES.get(g, g), ["```" + "\n".join(lines) + "```"] + sorted(notes)))
     if a["is_image"] and a["evaluator"]:
-        blocks.insert(0, (None, [f"Realism metrics use the {a['evaluator'].get('feature_dim')}-d feature space of the evaluation "
-                                 f"classifier (held-out accuracy {a['evaluator'].get('heldout_accuracy')}); per-pixel statistics use "
-                                 "all pixels. Each realism metric has a real-vs-real reference row."]))
+        blocks.insert(0, (None, ["Realism metrics use the evaluation classifier's feature space (see 'How to read this report'); "
+                                 "per-pixel statistics use all pixels. Indented rows are the real-vs-real reference or baseline."]))
     elif a["meta"]:
-        m = a["meta"]
-        blocks.insert(0, (None, [f"Realism metrics use the {m.get('eval_components')}-component evaluation space "
-                                 f"({100 * m.get('eval_variance_explained', 0):.1f}% of transformed-data variance); per-feature "
-                                 "statistics use all features. Each realism metric has a real-vs-real reference row."]))
+        blocks.insert(0, (None, ["Realism metrics use the evaluation PCA space (see 'How to read this report'); per-feature "
+                                 "statistics use all features. Indented rows are the real-vs-real reference or baseline."]))
     return text_pages("Evaluation metrics (held-out real data)", blocks)
 
 
 def _arm_line(name, r, keys=("target_f1", "macro_f1", "accuracy")):
     cells = "".join(f"{_fmt(r.get(f'{k}_mean')):>9} +/- {_fmt(r.get(f'{k}_sd')):<7}" for k in keys)
-    return f"{name:<32}{r.get('runs', [{}])[0].get('n_train', ''):>7}  {cells}"
+    return f"{_label(name):<32}{r.get('runs', [{}])[0].get('n_train', ''):>7}  {cells}"
 
 
 def objective_test_tables(a, short=False):
@@ -447,20 +551,20 @@ def objective_test_tables(a, short=False):
         t = d["tstr"]
         rows = [f"{'training set':<32}{'n':>7}  {'accuracy (mean +/- sd)':<26}{'macro F1 (mean +/- sd)':<26}"]
         rows += [_arm_line(n, r, ("accuracy", "macro_f1")) for n, r in t["arms"].items()]
-        rows += [f"utility ratio (synthetic / real accuracy): " + ", ".join(f"{k} {_fmt(v)}" for k, v in t["utility_ratio"].items())]
+        rows += [f"utility ratio (synthetic / real accuracy): " + ", ".join(f"{k.replace('synthetic_', '', 1)} {_fmt(v)}" for k, v in t["utility_ratio"].items())]
         out.append(("Objective test: train on synthetic, test on real (held-out real images)", rows))
     if a["anomaly"]:
         an = a["anomaly"]
         cs = an["corruptions"]
-        rows = [f"{'score':<30}" + "".join(f"{c:>17}" for c in cs) + f"{'mean AUROC':>12}"]
+        rows = [f"{'score':<30}" + "".join(f"{_label(c):>17}" for c in cs) + f"{'mean AUROC':>12}"]
         for n, r in an["results"].items():
-            rows.append(f"{n:<30}" + ("".join(f"{_fmt(r['auroc'][c]):>17}" for c in cs) + f"{_fmt(r['auroc_mean']):>12}"
+            rows.append(f"{_label(n):<30}" + ("".join(f"{_fmt(r['auroc'][c]):>17}" for c in cs) + f"{_fmt(r['auroc_mean']):>12}"
                                       if "auroc" in r else f"  {r.get('status', '')}"))
         out.append((f"Objective test: anomaly detection (AUROC, {an['n_normal']} normal vs {an['n_per_corruption']} corrupted per type)", rows))
     if a["imputation"]:
         im = a["imputation"]
         rows = [f"{'imputer':<30}{'RMSE':>10}{'MAE':>10}"]
-        rows += [f"{n:<30}" + (f"{_fmt(r['rmse']):>10}{_fmt(r['mae']):>10}" if "rmse" in r else f"  {r.get('status', '')}")
+        rows += [f"{_label(n):<30}" + (f"{_fmt(r['rmse']):>10}{_fmt(r['mae']):>10}" if "rmse" in r else f"  {r.get('status', '')}")
                  for n, r in im["results"].items()]
         out.append((f"Objective test: imputation ({im['mask_kind']} masking, error on {im['error_scale']} scale; lower is better)", rows))
     return out
@@ -481,18 +585,21 @@ def objective_test_pages(a):
         blocks.append((None, [a["anomaly"].get("note", "")]))
     if a["imputation"]:
         blocks.append((None, [a["imputation"].get("note", "")]))
-    defs = {}
-    for t in (d, a["anomaly"] or {}, a["imputation"] or {}):
-        defs.update(t.get("definitions", {}))
-    blocks.append(("Definitions", [f"- {k}: {v}" for k, v in defs.items()]))
     return text_pages("Objective tests on held-out real data", blocks)
 
 
 def definitions_page(a):
-    defs = {}
+    """Every metric and test quantity, defined before the tables that use it. The JSON field name is given in
+    brackets so a number can be traced to its file."""
+    defs, tests = {}, {}
     for m in a["metrics"].values():
         defs.update(m.get("definitions", {}))
-    return text_pages("How to read the metrics", [(None, [f"- {k}: {v}" for k, v in defs.items()] or ["No metrics."])])
+    for t in (a["downstream"] or {}, a["anomaly"] or {}, a["imputation"] or {}):
+        tests.update(t.get("definitions", {}))
+    blocks = [("Model metrics", [f"- {_label(k)} [{k}]: {v}" for k, v in defs.items()] or ["No metrics."])]
+    if tests:
+        blocks.append(("Objective-test quantities", [f"- {_label(k)} [{k}]: {v}" for k, v in tests.items()]))
+    return text_pages("Metric definitions", blocks)
 
 
 CAPTIONS = {
@@ -511,6 +618,8 @@ def figure_pages(a):
     figs = []
     for png in sorted((a["out"] / "figures").glob("*.png")):
         cap = next((c for k, c in CAPTIONS.items() if png.stem.startswith(k)), png.stem)
+        if png.stem.startswith("latent_"):
+            cap = f"{png.stem[len('latent_'):]}: " + cap
         figs.append(figure_page(png, cap))
     return figs
 
@@ -542,8 +651,10 @@ def recommendation_pages(a):
         return text_pages("Downstream use", [(None, ["recommendation.json was not written."])])
     blocks = []
     for u in r["uses"]:
-        lines = [f"Verdict: {u['verdict'].upper()}  |  task: {u.get('task')}  |  model: {u.get('model_key', '')}", u.get("rationale", "")]
-        lines += [f"- evidence: {e['metric']} = {_fmt(e.get('value'))}" + (f" (vs {e['compared_to']})" if e.get("compared_to") else "") for e in u.get("evidence", [])]
+        lines = [f"Verdict: {VERDICTS.get(u['verdict'], u['verdict'])}  |  task: {_task(u.get('task'))}  |  model: {u.get('model_key', '')}",
+                 u.get("rationale", "")]
+        lines += [f"- evidence: {_path_words(e['metric'])} = {_fmt(e.get('value'))}"
+                  + (f"; compared with {_readable_paths(e['compared_to'], a)}" if e.get("compared_to") else "") for e in u.get("evidence", [])]
         lines += [f"- caveat: {c}" for c in u.get("caveats", [])]
         blocks.append((u["use"], lines))
     if r.get("not_tested"):
@@ -558,9 +669,14 @@ def critique_pages(a):
     if not c:
         return []
     blocks = [(None, ["An independent critic subagent reviewed the objective, plan, metrics, and training logs (not the agent's "
-                      "own reasoning) before the recommendation and findings were written.", c.get("summary", "")])]
+                      "own reasoning) before the recommendation and findings were written. Each finding's evidence is in "
+                      f"outputs/{a['plan'].get('dataset')}/critique.json."]
+               + ([f"The critic reviewed plan revision {a['plan']['revision'] - 1}. Numbers it quotes for models changed in "
+                   "the revision differ from the tables above, which show the final runs."]
+                  if a["plan"].get("critique_applied") and (a["plan"].get("revision") or 1) > 1 else [])
+               + [c.get("summary", "")])]
     for f in c.get("findings", []):
-        blocks.append((f"[{f.get('severity', '')}] {f.get('category', '')}", [f.get("issue", ""), f"Evidence: {f.get('evidence', '')}",
+        blocks.append((f"[{f.get('severity', '')}] {f.get('category', '')}", [f.get("issue", ""),
                                                                           f"Recommendation: {f.get('recommendation', '')}"]))
     if a["plan"].get("critique_applied"):
         blocks.append(("Revision made in response", [f"Plan revision {a['plan'].get('revision')}: {a['plan']['critique_applied']}"]))
@@ -585,7 +701,7 @@ def limitations_pages(a, untraced):
                      "shared realism metrics (see 'How to read this report').")
     if a["meta"] and not a["is_image"]:
         items.append(f"Fidelity is measured in a {a['meta'].get('eval_components')}-component PCA space "
-                     f"({_fmt(a['meta'].get('eval_variance_explained'))} of training variance); differences outside it are not measured.")
+                     f"({100 * (a['meta'].get('eval_variance_explained') or 0):.1f}% of training variance); differences outside it are not measured.")
     if a["is_image"]:
         items.append("Image realism is judged in the feature space of a classifier trained on the same real data; differences that do "
                      "not affect classification (fine texture, staining details) are not measured by these numbers.")
@@ -631,8 +747,8 @@ def build(dataset, n, allow_untraced=False):
             print(f"  {u}")
         sys.exit("ERROR: fix findings.md so every number comes from metrics/run/profile JSON, then rerun.")
 
-    pages = (summary_page(a, n) + guide_pages(a) + objective_page(a) + data_page(a) + models_page(a) + metrics_pages(a)
-             + objective_test_pages(a) + definitions_page(a)
+    pages = (summary_page(a, n) + guide_pages(a) + definitions_page(a) + objective_page(a) + data_page(a) + models_page(a)
+             + metrics_pages(a) + objective_test_pages(a)
              + figure_pages(a) + findings_pages(a) + recommendation_pages(a) + critique_pages(a)
              + limitations_pages(a, untraced) + repro_pages(a, n))
 
