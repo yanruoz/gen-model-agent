@@ -15,6 +15,7 @@
       "Edit(./reports/**)",
       "Write(./reports/**)",
       "Bash(*pip install*)",
+      "Bash(cd *)",
       "Bash(rm *)",
       "Bash(git *)",
       "WebFetch",

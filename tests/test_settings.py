@@ -6,6 +6,7 @@ Run from the repo root:  venv/bin/python -m unittest discover -s tests -v
 """
 import json
 import re
+import sys
 import unittest
 from fnmatch import fnmatchcase
 from pathlib import Path
@@ -47,6 +48,20 @@ class TestPipelineIsolation(unittest.TestCase):
     def test_env_is_unreadable_in_both(self):
         self.assertIn("Read(./.env)", self.dev["deny"])
         self.assertIn("Read(./.env)", self.pipe["deny"])
+
+    def test_pipeline_denies_cd(self):
+        # A persisted `cd` moves every './' rule (seen in a rehearsal: all writes under outputs/ denied).
+        self.assertIn("Bash(cd *)", self.pipe["deny"])
+
+    def test_runtime_settings_add_absolute_rules(self):
+        sys.path.insert(0, str(CLAUDE_DIR.parent / "bin"))
+        from runtime_settings import build
+        repo = CLAUDE_DIR.parent.as_posix()
+        p = build()["permissions"]
+        self.assertIn(f"Write(/{repo}/outputs/**)", p["allow"])
+        self.assertIn(f"Write(/{repo}/reports/**)", p["deny"])
+        self.assertIn(f"Read(/{repo}/.env)", p["deny"])
+        self.assertTrue(set(self.pipe["allow"]) <= set(p["allow"]) and set(self.pipe["deny"]) <= set(p["deny"]))
 
     def test_dev_denies_push(self):
         self.assertTrue(any(_split(r) == ("Bash", "git push *") for r in self.dev["deny"]))

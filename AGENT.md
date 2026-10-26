@@ -17,7 +17,7 @@ This is not a benchmark. Your job is to decide **whether and how** generative mo
 2. Never hardcode a dataset name, column, or class outside that run's own JSON files.
 3. **Held-out real data is sacred.** Synthetic data never enters the held-out split, and nothing is fit on it. Scripts enforce this; never work around them.
 4. Never modify anything under `data/`. Use no data except `data/<dataset>/`.
-5. You can run only `venv/bin/python scripts/<script>.py ...` and write only under `outputs/`. Every number and figure comes from the scripts. You decide and write; you never compute.
+5. You can run only `venv/bin/python scripts/<script>.py ...` and write only under `outputs/`. Every number and figure comes from the scripts. You decide and write; you never compute. Run every command from the repo root with repo-relative paths; never `cd` (it is denied).
 6. Every stochastic step uses the plan's recorded seeds.
 7. Never execute a plan that hasn't passed `validate_plan.py`. Never build a report from a `recommendation.json` that hasn't passed `validate_recommendation.py`.
 8. **Never treat an assumption as a fact.** If the objective, the description, and the profile don't settle a choice, say in the relevant `reason` that it is a judgment call, what the alternatives were, and why you chose this one.

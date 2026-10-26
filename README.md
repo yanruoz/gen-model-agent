@@ -2,6 +2,8 @@
 
 BIOS 774 Project 2: an AI agent that takes a dataset and a free-text objective, decides whether and how to use generative modeling (VAE, GAN, normalizing flow, diffusion), trains and evaluates the chosen model(s) against held-out real data, recommends what the output can and cannot be used for, and writes a PDF report.
 
+The 4-page written report is `docs/report.pdf` (source `docs/report.tex`, built with `tectonic docs/report.tex`).
+
 ## Requirements
 
 - **Claude Code**, installed and logged in (`claude` on your `PATH`). The agent runs as a headless Claude Code session. See <https://claude.com/claude-code>. Check with `claude --version`.
@@ -22,11 +24,25 @@ cd gen-model-agent
 # Dataset 1: PBMC 3k single-cell RNA-seq (about 10 minutes)
 ./run.sh pbmc "Learn a low-dimensional representation and generate realistic synthetic cells for sharing" --report-number 1
 
-# Dataset 2: PathMNIST histology images (about 30 minutes)
-./run.sh pathmnist "Balance the rarest tissue class to improve a classifier" --report-number 2
+# Dataset 2: PathMNIST histology images (about 40 minutes, or about 70 if the critique leads to a retrain)
+./run.sh pathmnist "Generate realistic tissue images of each class that could replace the real data for training a tissue classifier" --report-number 2
 ```
 
 Each command prints one progress line per agent step and ends with `DONE: reports/<dataset>/generated_report_<N>.pdf`. It exits with an error if the report was not produced.
+
+**Keep the machine awake during runs.** A PathMNIST run can last over an hour, and the headless session dies if the computer sleeps. On macOS, `run.sh` prevents idle and system sleep with `caffeinate`, but it can't stop sleep from closing the lid: keep the lid open and the power plugged in. On Linux, disable suspend for the duration.
+
+**Usage.** Each run is a headless Claude Code session (`claude -p`), which counts against your Claude Code plan (per the Claude Code docs, `claude -p` usage on subscription plans draws from a separate monthly Agent SDK credit). If a run stops with a usage-limit or session-limit message, rerun the same command after the limit resets.
+
+Other objectives work the same way. For example, these were used to check that the agent chooses differently by objective:
+
+```bash
+./run.sh pbmc "Flag unusual cells that may be doublets or low-quality captures"      # anomaly detection
+./run.sh pbmc "Recover gene expression values lost to dropout"                        # imputation
+./run.sh pathmnist "Balance the rarest tissue class to improve a classifier"         # class balancing
+```
+
+An objective the pipeline cannot test on that data (for example uncertainty quantification) is declined or adapted, with the reason in the report.
 
 The agent's decisions (model choice, hyperparameters, evaluation) depend on the model's reasoning, so a rerun can choose slightly differently. Given the same plan, the numbers are deterministic: every training, sampling, and evaluation step is seeded.
 

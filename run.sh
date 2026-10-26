@@ -87,16 +87,20 @@ fi
 echo "[agent] claude -p (dataset=$DATASET${OBJECTIVE:+, objective=\"$OBJECTIVE\"})"
 # Isolation: --setting-sources local loads no user or project settings and no CLAUDE.md (so neither the
 # dev instructions nor anything they import reach the pipeline agent). The agent gets exactly:
-#   AGENT.md (appended system prompt), .claude/pipeline-settings.json (permissions), the skill files
+#   AGENT.md (appended system prompt), .claude/pipeline-settings.json (permissions, via bin/runtime_settings.py), the skill files
 #   it reads by path, and the subagents in .claude/agents/ (passed explicitly with --agents).
 # dontAsk: anything not allowlisted is denied, never prompted, so the run can't hang.
 # --strict-mcp-config: no MCP servers. stream-json + bin/agent_stream.py: progress, transcript, result.
 STATUS=0
 AGENTS_JSON=$(venv/bin/python bin/agents_json.py)   # .claude/agents/*.md -> --agents (e.g. the gen-critic subagent)
+# pipeline-settings.json plus absolute copies of its ./ path rules, so a `cd` can't move them;
+# kept in a temp dir outside outputs/ so the agent can't edit its own permissions.
+SETTINGS_DIR=$(mktemp -d); trap 'mv "$SETTINGS_DIR" "${TMPDIR:-/tmp}/.genagent_old_$$" 2>/dev/null || true' EXIT
+venv/bin/python bin/runtime_settings.py "$SETTINGS_DIR/pipeline-settings.json"
 claude -p "$PROMPT" \
   --append-system-prompt-file AGENT.md \
   --agents "$AGENTS_JSON" \
-  --settings .claude/pipeline-settings.json \
+  --settings "$SETTINGS_DIR/pipeline-settings.json" \
   --setting-sources local \
   --permission-mode dontAsk \
   --strict-mcp-config \
