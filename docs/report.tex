@@ -117,62 +117,71 @@ standard normal prior (ex-post density estimation, Ghosh et al., ICLR 2020).
 
 \section{Results}
 
-These numbers come from rehearsal runs of the final pipeline, each one \code{./run.sh} command on an empty
-\code{outputs/}. Generated reports 1 and 2 come from separate clean runs of the same commands; because the agent's
-decisions can vary between runs, their numbers may differ slightly.
+The PBMC and PathMNIST numbers below come from the clean runs that produced generated reports 1 and 2, each one
+\code{./run.sh} command on a fresh clone. The other objectives were run as rehearsals of the same pipeline.
 
 \textbf{PBMC 3k} (2,700 cells $\times$ 32,738 genes, 97.4\% zeros, raw counts, no labels). Objective: ``Learn a
 low-dimensional representation and generate realistic synthetic cells for sharing.'' The agent read this as
 representation learning plus data generation. It kept the 2,000 most variable genes, held out 20\% of cells, and chose an
-NB VAE on raw counts (latent size 10, two seeds) as the primary model, with a RealNVP flow on 20 principal components as
-the comparator. The critic found that the flow overfit by epoch 13 and had one seed; the revision made the flow smaller,
-lowered its learning rate, and added a second seed. The VAE runs were reused.
+NB VAE on raw counts (latent size 10) as the primary model, with a RealNVP flow on 20 principal components as the
+comparator. The critic found that the flow overfit from epoch 13 and that the two models could not be ranked because
+the spread between seeds was as large as the gap between them. The revision made the flow smaller, lowered its learning
+rate, and gave both models a third seed. Values below are for seeds 0 / 1 / 2.
 
 \begin{center}\small
-\begin{tabular}{lcccc}
+\begin{tabular}{lcc}
 \toprule
- & VAE seed 0 & VAE seed 1 & flow seed 0 & flow seed 1\\
+ & NB VAE & flow (PCA space)\\
 \midrule
-C2ST AUC (reference 0.58 / 0.56) & 0.865 & 0.842 & 0.855 & 0.809\\
-MMD$^2$ (reference 0.0003) & 0.0075 & 0.0053 & 0.0086 & 0.0054\\
-precision / recall & 0.94 / 0.74 & 0.94 / 0.80 & 0.58 / 0.98 & 0.58 / 0.98\\
-DCR ratio & 1.14 & 1.15 & 1.61 & 1.52\\
-trustworthiness (10-component PCA: 0.833) & 0.803 & 0.794 & -- & --\\
+C2ST AUC (reference 0.58 / 0.56 / 0.59) & 0.865 / 0.842 / 0.866 & 0.856 / 0.834 / 0.791\\
+MMD$^2$ (reference 0.0003) & 0.0075 / 0.0053 / 0.0121 & 0.0077 / 0.0059 / 0.0080\\
+precision & 0.94 / 0.94 / 0.91 & 0.56 / 0.54 / 0.62\\
+recall & 0.74 / 0.80 / 0.77 & 0.98 / 0.98 / 0.97\\
+DCR ratio & 1.14 / 1.15 / 1.19 & 1.63 / 1.57 / 1.44\\
+trustworthiness (10-component PCA: 0.833) & 0.803 / 0.794 / 0.805 & --\\
 \bottomrule
 \end{tabular}
 \end{center}
 
-The VAE reproduces per-gene statistics (correlation with held-out real data: 0.998 for means, 0.993 for zero
-fractions; median library size within 1\%), but a classifier still separates its cells from real ones (C2ST 0.84--0.87),
-and its latent space keeps neighbors slightly worse than PCA. DCR ratios above 1 show no sign of copying. The flow covers
-the real cells (recall 0.98), but 42\% of its samples are not near any real cell. The agent reported that both parts of
-its success criterion failed, recommended neither the latent codes nor the synthetic cells as stand-ins for real cells,
-allowed the synthetic counts only as test data for software that needs realistic per-gene distributions, and stated that
-no formal privacy guarantee is given.
+The VAE reproduces per-gene statistics (correlation with held-out real data: 0.998 for means, 0.99 for zero
+fractions; median library size within 2\%), but a classifier still separates its cells from real ones (C2ST 0.84--0.87),
+and its latent space keeps neighbors slightly worse than PCA in all three seeds. DCR ratios above 1 show no sign of
+copying. The flow covers the real cells (recall 0.97--0.98), but 38--46\% of its samples are not near any real cell.
+The agent reported that both parts of its success criterion failed, recommended neither the latent codes nor the
+synthetic cells as stand-ins for real cells, allowed the synthetic counts only as example data for software that
+processes count matrices, and stated that no formal privacy guarantee is given.
 
 \textbf{PathMNIST} (89,996 $28\times28\times3$ images, 9 tissue classes, largest/smallest class ratio 1.63). Objective:
 ``Generate realistic tissue images of each class that could replace the real data for training a tissue classifier.''
-The agent trained conditional diffusion on a stratified 20,000-image subsample and ran TSTR with $n=10{,}000$ and three
-classifier seeds per arm. The first model (110 epochs) reached a utility ratio of 0.66, and its validation loss was still
-falling at the last epoch. The critic flagged this, and the revision retrained for 155 epochs.
+The agent trained conditional diffusion (100 epochs, one seed, 20 minutes on the laptop GPU) on a stratified
+20,000-image subsample and ran TSTR with $n=10{,}000$ and three classifier seeds per arm. The critic noted that
+validation loss was still falling at the last epoch, that the guidance setting's stated reason did not match the low
+recall, and that with no comparator the run could not say whether the shortfall was specific to diffusion. A longer
+retrain did not fit the remaining budget, so the revision added a conditional GAN (two seeds, 25 epochs) as the
+comparator and listed undertraining as a limitation.
 
 \begin{center}\small
 \begin{tabular}{lccc}
 \toprule
- & 110 epochs & 155 epochs (final) & reference\\
+ & diffusion & GAN seed 0 & GAN seed 1\\
 \midrule
-TSTR accuracy (real-trained: $0.913 \pm 0.002$) & -- & $0.763 \pm 0.014$ & \\
-utility ratio & 0.66 & 0.84 & 1\\
-Fr\'echet distance & 26.5 & 21.9 & 0.29\\
-C2ST AUC & 0.982 & 0.972 & 0.506\\
-label agreement & 0.846 & 0.888 & 0.940\\
+TSTR accuracy (real-trained: $0.913 \pm 0.002$) & $0.659 \pm 0.022$ & $0.461 \pm 0.021$ & $0.440 \pm 0.006$\\
+utility ratio (reference 1) & 0.72 & 0.51 & 0.48\\
+Fr\'echet distance (reference 0.29) & 21.8 & 61.9 & 46.3\\
+C2ST AUC (reference 0.51 / 0.51 / 0.52) & 0.975 & 0.999 & 0.998\\
+precision / recall & 0.76 / 0.52 & 0.83 / 0.07 & 0.89 / 0.07\\
+label agreement (reference 0.94) & 0.885 & 0.280 & 0.363\\
 \bottomrule
 \end{tabular}
 \end{center}
 
-Longer training improved every metric, but the synthetic images cannot replace real ones: the classifier loses 15
-accuracy points, and generated images of classes 6 and 7 are recognized as their class only 68\% and 67\% of the time.
-The agent recommended against replacement and allowed the images only as illustrative examples.
+The synthetic images cannot replace real ones: a classifier trained on diffusion images loses 25 accuracy points, and
+generated class-6 images are recognized as their class only 63\% of the time. The GAN is worse on every metric. Its
+recall of 0.07 means its images cover only a small part of the real image types, and most are not recognized as the
+requested class, so the shortfall is not specific to diffusion. The agent recommended against replacement for both
+models and allowed the diffusion images only as illustrative examples. In an earlier rehearsal of the same command the
+critic's finding led instead to a 155-epoch retrain, which raised the diffusion utility ratio from 0.66 to 0.84: longer
+training helps, but even then the images fell short of replacing real data.
 
 \textbf{Robustness: other objectives on the same data.} On PBMC, ``Recover gene expression values lost to dropout'' was
 read as imputation. The agent trained only the VAE (the only family the imputation test supports) and hid 10\% of each
@@ -194,14 +203,11 @@ During development, ``Balance the rarest tissue class to improve a classifier'' 
 accuracy was 0.912 on real data, 0.923 with resampling, and 0.923 with new real images of the rare class. At this mild
 imbalance even perfect synthetic images could not beat resampling, and adding diffusion images gave 0.909.
 
-\textbf{Why no GAN ran.} The conditional GAN is implemented and tested, but the agent never chose it. The rules make
-conditional diffusion the primary model for labeled images, because it trains stably and follows the class label
-reliably. A GAN is the comparator only when the plan needs faster sampling and says why. The validator excludes GANs
-from anomaly detection, imputation, and representation learning, since a GAN has neither a likelihood nor an encoder, and
-the skill treats a GAN as the least stable choice for a few thousand tabular rows. A GAN also needs at least two seeds
-(about 8 minutes each here), because its results depend strongly on the seed. In the PathMNIST run the first diffusion
-model used 18.6 of the 30 minutes, leaving less than the 16 two GAN seeds need. The reports therefore contain no
-GAN-vs-diffusion comparison. This is a gap: a GAN might give sharper images, at the cost of covering fewer image types.
+\textbf{When a GAN runs.} The rules make conditional diffusion the primary model for labeled images, because it trains
+stably and follows the class label reliably; a GAN enters only as a comparator with a stated reason, and always with at
+least two seeds because its results depend strongly on the seed. The validator excludes GANs from anomaly detection,
+imputation, and representation learning, since a GAN has neither a likelihood nor an encoder. In the clean PathMNIST
+run the GAN entered after the critique, and its low recall matched the expected weakness (covering few image types).
 
 \section{Strengths and limitations}
 
@@ -213,8 +219,9 @@ GAN-vs-diffusion comparison. This is a gap: a GAN might give sharper images, at 
 \item \emph{Decisions are checked in code.} Validators reject a model that lacks the needed capability, vague reasons,
   budget overruns, uncited downstream claims, and privacy claims. The headroom check keeps the agent from promising
   gains that even new real data would not give.
-\item \emph{The critique changed results.} On PathMNIST it raised the utility ratio from 0.66 to 0.84; on PBMC it fixed
-  an overfit comparator.
+\item \emph{The critique changed results.} On PathMNIST it added a GAN comparator in the clean run, which showed the
+  shortfall is not specific to diffusion, and in a rehearsal it led to a retrain that raised the utility ratio from 0.66
+  to 0.84. On PBMC it fixed an overfit comparator and added a third seed to each model.
 \item \emph{Isolation and reproducibility.} One command, an isolated environment, seeded training, and a run that loads
   no user settings and can execute only the project's scripts.
 \end{itemize}
@@ -223,13 +230,14 @@ GAN-vs-diffusion comparison. This is a gap: a GAN might give sharper images, at 
 \begin{itemize}
 \item \emph{Small models and budgets.} Models are sized for a laptop and a 30-minute training budget. Image Fr\'echet
   distances use a small PathMNIST classifier, not the Inception network, so they are not comparable to published FIDs.
-\item \emph{Few seeds, one split.} Most results use two or three seeds on one held-out split, so the reported spread
-  covers training noise, not variation across splits or masks.
+\item \emph{Few seeds, one split.} Most results use two or three seeds on one held-out split (the PathMNIST diffusion
+  model has one), so the reported spread covers training noise, not variation across splits or masks.
 \item \emph{Limited task coverage.} Uncertainty quantification has no test and is always declined or adapted; class
   balancing is tested only on images; categorical tabular features are not supported.
 \item \emph{No privacy guarantee.} The DCR ratio is evidence against copying, not differential privacy.
-\item \emph{Run-to-run variation.} The agent's decisions are not deterministic, and a retrain after critique can nearly
-  double the PathMNIST run time (about 65 minutes in the rehearsal).
+\item \emph{Run-to-run variation.} The agent's decisions are not deterministic. For the same PathMNIST command, the clean
+  run answered the critique with a GAN comparator and a rehearsal with a longer retrain (final utility ratios 0.72 and
+  0.84). A retrain can nearly double the run time (about 65 minutes in the rehearsal).
 \item \emph{Issue found in rehearsal.} One run lost write access after the agent ran \code{cd}, because path permissions
   were relative to the working directory. \code{run.sh} now passes absolute path rules and denies \code{cd}.
 \end{itemize}
